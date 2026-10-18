@@ -2,6 +2,7 @@ cache/
 ccache/
 work/
 output/
+outputs/
 linux-bin/
 build.log
 

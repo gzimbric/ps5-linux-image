@@ -1,0 +1,596 @@
+image:
+  name: ps5-ubuntu2404
+  distribution: ubuntu
+  release: noble
+  description: Ubuntu Noble desktop
+  architecture: x86_64
+
+source:
+  downloader: debootstrap
+  url: http://archive.ubuntu.com/ubuntu
+  variant: minbase
+  keyserver: keyserver.ubuntu.com
+  keys:
+  - 0x790BC7277767219C42C86F933B4FE6ACC0B21F32
+  - 0xf6ecb3762474eda9d21b7022871920d1991bc93c
+
+packages:
+  manager: apt
+  update: true
+  cleanup: true
+
+  repositories:
+  - name: sources.list
+    url: |-
+      deb http://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
+      deb http://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
+      deb http://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe multiverse
+    architectures:
+    - amd64
+
+  sets:
+  - packages:
+    - ubuntu-desktop
+    - gnome-software
+    - firefox
+    - openssh-server
+    - build-essential
+    - network-manager
+    - linux-firmware
+    - initramfs-tools
+    - kmod
+    - dialog
+    - sudo
+    - nano
+    - cloud-guest-utils
+    - kexec-tools
+    - fonts-ubuntu
+    - fonts-liberation
+    - fonts-dejavu
+    - fontconfig
+    - systemd-zram-generator
+    - git
+    - flex
+    - gawk
+    - bison
+    - dwarves
+    - libelf-dev
+    - libssl-dev
+    - libncurses-dev
+    - cpio
+    - zstd
+    - lm-sensors
+    - iperf3
+    - ethtool
+    - pciutils
+    - usbutils
+    - libdrm-tests
+    action: install
+
+files:
+- path: /etc/hostname
+  generator: hostname
+
+- path: /etc/hosts
+  generator: hosts
+
+- path: /etc/machine-id
+  generator: dump
+
+- path: /etc/NetworkManager/conf.d/dns.conf
+  generator: copy
+  source: /tmp/build-staging/nm-dns.conf
+
+- path: /etc/fstab
+  generator: copy
+  source: /tmp/build-staging/fstab
+
+- path: /usr/local/sbin/grow-rootfs
+  generator: copy
+  source: /tmp/build-staging/grow-rootfs
+  mode: "0755"
+
+- path: /etc/systemd/system/grow-rootfs.service
+  generator: copy
+  source: /tmp/build-staging/grow-rootfs.service
+
+- path: /opt/debs/
+  generator: copy
+  source: /tmp/build-staging/debs
+
+- path: /opt/ps5-bootstrap/
+  generator: copy
+  source: /tmp/build-staging/ps5-bootstrap
+
+actions:
+- trigger: post-unpack
+  action: |-
+    #!/bin/bash
+    set -eux
+    rm -f /var/lib/apt/lists/*InRelease /var/lib/apt/lists/*Release /var/lib/apt/lists/*Packages* || true
+    printf 'Acquire::Retries "10";\n' > /etc/apt/apt.conf.d/80retry
+
+    # The control image must never acquire a generic or HWE kernel beside
+    # the verified PS5 build.
+    cat > /etc/apt/preferences.d/99-ps5-kernel <<'EOF'
+    Package: linux-generic* linux-image-generic* linux-headers-generic* linux-image-*-generic linux-modules-*-generic linux-modules-extra-*-generic linux-headers-*-generic
+    Pin: version *
+    Pin-Priority: -1
+    EOF
+
+    apt-get update
+    apt-get install -y gnupg dirmngr curl
+
+    mkdir -p /root/.gnupg /etc/apt/keyrings
+    chmod 700 /root/.gnupg
+    ppa_key=$(mktemp)
+    curl -fsSL \
+        "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0AB215679C571D1C8325275B9BDB3D89CE49EC21" \
+        -o "$ppa_key"
+    mapfile -t ppa_fingerprints < <(
+        gpg --batch --show-keys --with-colons "$ppa_key" \
+            | awk -F: '$1 == "pub" { primary = 1; next }
+                primary && $1 == "fpr" { print $10; primary = 0 }'
+    )
+    test "${#ppa_fingerprints[@]}" -eq 1
+    test "${ppa_fingerprints[0]}" = \
+        0AB215679C571D1C8325275B9BDB3D89CE49EC21
+    gpg --batch --no-default-keyring \
+        --keyring gnupg-ring:/etc/apt/keyrings/mozillateam.gpg \
+        --import "$ppa_key"
+    rm -f "$ppa_key"
+    chmod 644 /etc/apt/keyrings/mozillateam.gpg
+
+    echo "deb [signed-by=/etc/apt/keyrings/mozillateam.gpg] http://ppa.launchpad.net/mozillateam/ppa/ubuntu noble main" \
+        > /etc/apt/sources.list.d/mozilla-ppa.list
+    cat > /etc/apt/preferences.d/mozilla-ppa <<'EOF'
+    Package: firefox*
+    Pin: release o=LP-PPA-mozillateam
+    Pin-Priority: 1001
+    EOF
+
+- trigger: post-update
+  action: |-
+    #!/bin/bash
+    set -eux
+    passwd -l root
+
+- trigger: post-packages
+  action: |-
+    #!/bin/bash
+    set -eux
+    fc-cache -f
+
+    for group in input render; do
+        getent group "$group" >/dev/null || groupadd --system "$group"
+    done
+    if getent passwd 1000 >/dev/null; then
+        echo "UID 1000 is already occupied" >&2
+        exit 1
+    fi
+    useradd --uid 1000 --create-home --user-group \
+        --groups sudo,video,input,render --shell /bin/bash ps5
+    # The sanitized public bring-up profile uses a documented first-login
+    # password so a headless system can be reached without shipping a key.
+    # Users must change it immediately after the first login.
+    printf 'ps5:ubuntu\n' | chpasswd
+
+    install -d -m 0750 /etc/sudoers.d
+    printf 'ps5 ALL=(ALL:ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/90-ps5-control
+    chmod 0440 /etc/sudoers.d/90-ps5-control
+    visudo -cf /etc/sudoers.d/90-ps5-control
+
+    install -d -m 0755 /etc/ssh/sshd_config.d
+    cat > /etc/ssh/sshd_config.d/10-ps5-control.conf <<'EOF'
+    PermitRootLogin no
+    PubkeyAuthentication yes
+    PasswordAuthentication yes
+    PermitEmptyPasswords no
+    KbdInteractiveAuthentication no
+    ChallengeResponseAuthentication no
+    AllowUsers ps5
+    EOF
+    install -d -m 0755 /run/sshd
+    sshd -t
+
+    install -d -m 0755 /etc/gdm3
+    cat > /etc/gdm3/custom.conf <<'EOF'
+    [daemon]
+    AutomaticLoginEnable=true
+    AutomaticLogin=ps5
+    EOF
+    install -d -m 0755 /etc/systemd/system/gdm.service.d
+    cat > /etc/systemd/system/gdm.service.d/10-ps5-bringup.conf <<'EOF'
+    [Unit]
+    Wants=NetworkManager.service ssh.service
+    After=NetworkManager.service ssh.service ps5fan.service ps5-amdgpu-reprobe.service
+    EOF
+
+    install -d -m 0755 /home/ps5/.config
+    printf 'yes\n' > /home/ps5/.config/gnome-initial-setup-done
+    install -d -m 0755 /var/lib/AccountsService/users
+    cat > /var/lib/AccountsService/users/ps5 <<'EOF'
+    [User]
+    Language=en_US.UTF-8
+    XSession=ubuntu
+    SystemAccount=false
+    EOF
+
+    install -d -m 0755 /etc/systemd/journald.conf.d
+    cat > /etc/systemd/journald.conf.d/10-persistent.conf <<'EOF'
+    [Journal]
+    Storage=persistent
+    EOF
+    install -d -m 2755 -o root -g systemd-journal /var/log/journal
+
+    install -d -m 0755 /etc/modprobe.d
+    printf '%s\n' 'options amdgpu dpm=0 gpu_recovery=0 force_1080p=1' \
+        > /etc/modprobe.d/ps5-amdgpu.conf
+    cat > /etc/modprobe.d/ps5-iw620-noautoload.conf <<'EOF'
+    blacklist moal
+    blacklist mlan
+    EOF
+    install -d -m 0755 /etc/modules-load.d
+    printf 'mts\n' > /etc/modules-load.d/ps5-ethernet.conf
+
+    printf '[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n' \
+        > /etc/systemd/zram-generator.conf
+
+    chown -R ps5:ps5 /home/ps5
+    systemctl enable NetworkManager.service
+    systemctl enable ssh.service
+    test -f /usr/lib/systemd/system/gdm.service
+    ln -sfn /usr/lib/systemd/system/gdm.service \
+        /etc/systemd/system/display-manager.service
+    systemctl set-default graphical.target
+
+- trigger: post-files
+  action: |-
+    #!/bin/bash
+    set -euxo pipefail
+
+    expected_fan_source=b4167315a767c3b598b4b99bc6995441422d3ec00c8c9406dbf50518d639d86f
+    expected_fan_service=19711fd4b0d001a0e4218e6051341b63cff6369420f5b999c4868d731c1d9404
+    expected_reprobe=6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
+    expected_reprobe_service=2409fd812118088098ce6b740acb913d872c1df1efdb38e6254d4d388cabe72e
+    expected_report=0ffa81a72d57153590853c00c452f8a497ce951f986eb9c08ddfdd155e700f78
+    expected_report_service=ecce500865af6769bc92cb41ad00a0d1fa62364480058c645323cbe9f40378a2
+    expected_report_timer=9074e18c67eaec808a8934417573020249d2c3938b8688fb9ef3b36307c04fec
+    test "$(sha256sum /opt/ps5-bootstrap/ps5_fan_max.c | awk '{print $1}')" = "$expected_fan_source"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5fan.service | awk '{print $1}')" = "$expected_fan_service"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5-amdgpu-reprobe | awk '{print $1}')" = "$expected_reprobe"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5-amdgpu-reprobe.service | awk '{print $1}')" = "$expected_reprobe_service"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5-boot-report | awk '{print $1}')" = "$expected_report"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5-boot-report.service | awk '{print $1}')" = "$expected_report_service"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5-boot-report.timer | awk '{print $1}')" = "$expected_report_timer"
+
+    gcc -std=c11 -Os -Wall -Wextra -Werror \
+        -o /usr/local/sbin/ps5_fan_max \
+        /opt/ps5-bootstrap/ps5_fan_max.c
+    chown root:root /usr/local/sbin/ps5_fan_max
+    chmod 0755 /usr/local/sbin/ps5_fan_max
+    test -x /usr/local/sbin/ps5_fan_max
+    test ! -e /usr/local/sbin/ps5_control
+    install -m 0644 /opt/ps5-bootstrap/ps5fan.service \
+        /etc/systemd/system/ps5fan.service
+
+    cat > /etc/systemd/system/ps5-ssh-host-keys.service <<'EOF'
+    [Unit]
+    Description=Generate unique SSH host keys
+    After=local-fs.target
+    Before=ssh.service ssh.socket
+
+    [Service]
+    Type=oneshot
+    UMask=0077
+    RuntimeDirectory=sshd
+    RuntimeDirectoryMode=0755
+    ExecStart=/usr/bin/ssh-keygen -A
+    ExecStart=/usr/sbin/sshd -t
+    RemainAfterExit=yes
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+    install -d -m 0755 \
+        /etc/systemd/system/ssh.service.d \
+        /etc/systemd/system/ssh.socket.d
+    cat > /etc/systemd/system/ssh.service.d/10-ps5-host-keys.conf <<'EOF'
+    [Unit]
+    Requires=ps5-ssh-host-keys.service
+    After=ps5-ssh-host-keys.service
+    EOF
+    cp /etc/systemd/system/ssh.service.d/10-ps5-host-keys.conf \
+        /etc/systemd/system/ssh.socket.d/10-ps5-host-keys.conf
+    install -m 0755 /opt/ps5-bootstrap/ps5-amdgpu-reprobe \
+        /usr/local/sbin/ps5-amdgpu-reprobe
+    install -m 0644 /opt/ps5-bootstrap/ps5-amdgpu-reprobe.service \
+        /etc/systemd/system/ps5-amdgpu-reprobe.service
+    install -m 0755 /opt/ps5-bootstrap/ps5-boot-report \
+        /usr/local/sbin/ps5-boot-report
+    install -m 0644 /opt/ps5-bootstrap/ps5-boot-report.service \
+        /etc/systemd/system/ps5-boot-report.service
+    install -m 0644 /opt/ps5-bootstrap/ps5-boot-report.timer \
+        /etc/systemd/system/ps5-boot-report.timer
+
+    # Keep the exact uncompressed firmware payloads used on the successful
+    # display boot. A package drift here stops the image build.
+    firmware_dir=/usr/lib/firmware/amdgpu
+    firmware_ref=3b128b6069267b60a46a4074c383183177ee6e6d
+    test -d "$firmware_dir"
+    while read -r name expected; do
+        raw="$firmware_dir/cyan_skillfish2_${name}.bin"
+        compressed="${raw}.zst"
+        candidate=$(mktemp)
+        if [ -e "$raw" ]; then
+            cp -L "$raw" "$candidate"
+        elif [ -e "$compressed" ]; then
+            # linux-firmware uses relative symlinks for identical blobs (for
+            # example mec2 -> mec). zstd ignores symlink inputs unless forced.
+            zstd -q -f -d -c "$compressed" > "$candidate"
+        fi
+        if [ "$(sha256sum "$candidate" | awk '{print $1}')" != "$expected" ]; then
+            curl -fsSL \
+                "https://gitlab.com/kernel-firmware/linux-firmware/-/raw/$firmware_ref/amdgpu/$(basename "$raw")" \
+                -o "$candidate"
+        fi
+        test "$(sha256sum "$candidate" | awk '{print $1}')" = "$expected"
+        rm -f "$raw"
+        install -m 0644 "$candidate" "$raw"
+        rm -f "$candidate"
+    done <<'EOF'
+    ce 5946efbf7e46ccfe7e9f965da56c35b1187469d1c1a49c8a9eff433eb3ab4723
+    me d4ed4d968de0d7720f7c8215d42fdae727bf99cdf43cee6f8f864dc2584b17e2
+    mec b1c1f843a8faaa2de537d6ba05052a3776b5a1b73f8a3c3f5ed9d568489776a4
+    mec2 b1c1f843a8faaa2de537d6ba05052a3776b5a1b73f8a3c3f5ed9d568489776a4
+    pfp 50e56dc1913571ff589425d2b059bddfc5e8a2b4bc22d3eb78cac75d1e0479a1
+    rlc 20acefdb6128a36275f4382425a109a7c9927f6053eab685bb51164ff1d18cfb
+    sdma 15d0d3626da7f2513f03b13bb7e02eeeeccab276276ae27d0b6067b5f25e9e95
+    sdma1 bd1c0b0f6a6a4f17ede034f2c844b6553fc444e08915c7bb500c09fde59d6255
+    EOF
+
+    install -d -m 0755 /etc/initramfs-tools/conf.d /etc/initramfs-tools/hooks
+    cat > /etc/initramfs-tools/modules <<'EOF'
+    # USB root drive
+    xhci_pci
+    xhci_hcd
+    usb_storage
+    uas
+    sd_mod
+    # Root and boot filesystems
+    ext4
+    vfat
+    # Early display
+    amdgpu
+    # Recovery input
+    usbhid
+    hid_generic
+    EOF
+    cat > /etc/initramfs-tools/conf.d/ps5-control <<'EOF'
+    MODULES=list
+    BUSYBOX=y
+    RESUME=none
+    EOF
+    cat > /etc/initramfs-tools/hooks/ps5-firmware <<'EOF'
+    #!/bin/sh
+    set -eu
+    case "${1:-}" in
+        prereqs) exit 0 ;;
+    esac
+    dest="$DESTDIR/usr/lib/firmware/amdgpu"
+    mkdir -p "$dest" "$DESTDIR/etc/modprobe.d"
+    cp /etc/modprobe.d/ps5-amdgpu.conf "$DESTDIR/etc/modprobe.d/"
+    cp /etc/modprobe.d/ps5-iw620-noautoload.conf "$DESTDIR/etc/modprobe.d/"
+    for name in ce me mec mec2 pfp rlc sdma sdma1; do
+        file="cyan_skillfish2_${name}.bin"
+        test -f "/usr/lib/firmware/amdgpu/$file"
+        cp -L "/usr/lib/firmware/amdgpu/$file" "$dest/$file"
+    done
+    EOF
+    chmod 0755 /etc/initramfs-tools/hooks/ps5-firmware
+
+    # No other kernel may be present in the first control image.
+    if find /lib/modules -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .; then
+        find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' >&2
+        echo "Unexpected kernel modules installed before linux-ps5" >&2
+        exit 1
+    fi
+
+    mkdir -p /boot/efi
+    set -- /opt/debs/*.deb
+    test "$#" -eq 1
+    test "$(dpkg-deb -f "$1" Package)" = linux-ps5
+    test "$(dpkg-deb -f "$1" Version)" = 7.1.7
+    test "$(dpkg-deb -f "$1" Provides)" = linux-image-7.1.7
+    test "$(dpkg-deb -f "$1" Conflicts)" = linux-image-7.1.7
+    test "$(dpkg-deb -f "$1" Replaces)" = linux-image-7.1.7
+    dpkg -i "$1"
+    rm -rf /opt/debs
+
+    KVER=7.1.7
+    test -d "/lib/modules/$KVER"
+    test ! -e "/lib/modules/$KVER/build"
+    test ! -L "/lib/modules/$KVER/build"
+    test ! -e "/lib/modules/$KVER/source"
+    test ! -L "/lib/modules/$KVER/source"
+    if find "/lib/modules/$KVER/extra" -type f -print -quit 2>/dev/null | grep -q .; then
+        echo "Unexpected out-of-tree module in exact Ubuntu 24.04 package" >&2
+        exit 1
+    fi
+    mapfile -t installed_kernels < <(find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+    test "${#installed_kernels[@]}" -eq 1
+    test "${installed_kernels[0]}" = "$KVER"
+    test "$(stat -c %s "/boot/vmlinuz-$KVER")" = 12702720
+    test "$(sha256sum "/boot/vmlinuz-$KVER" | awk '{print $1}')" = \
+        11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee34e99cde
+    mts_module="/lib/modules/$KVER/kernel/drivers/net/phy/mts/mts.ko"
+    test -f "$mts_module"
+    test "$(sha256sum "$mts_module" | awk '{print $1}')" = \
+        2d7ac8e6ecce80e0f23b624cec66835325951c5bc9c4e620e5f57283caa279a2
+
+    # The proven package contains no out-of-tree IW620 modules. Remove every
+    # automatic load path, including any stale files from a cached rootfs.
+    rm -f /etc/modules-load.d/moal
+    rm -f /etc/systemd/system/sysinit.target.wants/ps5-stage-firmware.service
+    rm -f /etc/systemd/system/ps5-stage-firmware.service
+    ln -s /dev/null /etc/systemd/system/ps5-stage-firmware.service
+    grep -qxF 'blacklist moal' /etc/modprobe.d/ps5-iw620-noautoload.conf
+    grep -qxF 'blacklist mlan' /etc/modprobe.d/ps5-iw620-noautoload.conf
+
+    rm -f /etc/kernel/postinst.d/zz-update-boot
+    depmod -a "$KVER"
+    update-initramfs -u -k "$KVER"
+    initrd="/boot/initrd.img-$KVER"
+    test -s "$initrd"
+
+    lsinitramfs "$initrd" > /tmp/ps5-initrd.contents
+    kernel_config="/boot/config-$KVER"
+    test -s "$kernel_config"
+    require_driver() {
+        symbol="$1"
+        module_pattern="$2"
+        if grep -qx "${symbol}=y" "$kernel_config"; then
+            return 0
+        fi
+        grep -qx "${symbol}=m" "$kernel_config"
+        grep -Eq "$module_pattern" /tmp/ps5-initrd.contents
+    }
+    require_driver CONFIG_DRM_AMDGPU '(^|/)amdgpu\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_USB_XHCI_HCD '(^|/)xhci[_-]hcd\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_USB_XHCI_PCI '(^|/)xhci[_-]pci\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_USB_STORAGE '(^|/)usb[_-]storage\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_USB_UAS '(^|/)uas\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_BLK_DEV_SD '(^|/)sd[_-]mod\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_EXT4_FS '(^|/)ext4\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_VFAT_FS '(^|/)vfat\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_USB_HID '(^|/)usbhid\.ko(\.(gz|xz|zst))?$'
+    require_driver CONFIG_HID_GENERIC '(^|/)hid[_-]generic\.ko(\.(gz|xz|zst))?$'
+    grep -Eq '(^|/)etc/modprobe.d/ps5-amdgpu.conf$' /tmp/ps5-initrd.contents
+    grep -Eq '(^|/)etc/modprobe.d/ps5-iw620-noautoload.conf$' /tmp/ps5-initrd.contents
+    if grep -Eq '(^|/)etc/modules-load.d/moal$' /tmp/ps5-initrd.contents; then
+        echo "IW620 autoload file leaked into initramfs" >&2
+        exit 1
+    fi
+
+    audit_dir=$(mktemp -d)
+    unmkinitramfs "$initrd" "$audit_dir"
+    mapfile -t amdgpu_policy < <(find "$audit_dir" -type f \
+        -path '*/etc/modprobe.d/ps5-amdgpu.conf' -print)
+    test "${#amdgpu_policy[@]}" -eq 1
+    test "$(sha256sum "${amdgpu_policy[0]}" | awk '{print $1}')" = \
+        b8790c02b88ea706e6d5bb495996e3ddfffcc3f3a0caa35aa8d8384a96ac6f64
+    mapfile -t iw620_policy < <(find "$audit_dir" -type f \
+        -path '*/etc/modprobe.d/ps5-iw620-noautoload.conf' -print)
+    test "${#iw620_policy[@]}" -eq 1
+    test "$(sha256sum "${iw620_policy[0]}" | awk '{print $1}')" = \
+        e12a72fdbfe929e6628c6e68bfb398291f84503f47715248b1146a2ff943fe88
+    while read -r name expected; do
+        file="cyan_skillfish2_${name}.bin"
+        mapfile -t matches < <(find "$audit_dir" -type f \
+            -path "*/usr/lib/firmware/amdgpu/$file" -print)
+        test "${#matches[@]}" -eq 1
+        test "$(sha256sum "${matches[0]}" | awk '{print $1}')" = "$expected"
+    done <<'EOF'
+    ce 5946efbf7e46ccfe7e9f965da56c35b1187469d1c1a49c8a9eff433eb3ab4723
+    me d4ed4d968de0d7720f7c8215d42fdae727bf99cdf43cee6f8f864dc2584b17e2
+    mec b1c1f843a8faaa2de537d6ba05052a3776b5a1b73f8a3c3f5ed9d568489776a4
+    mec2 b1c1f843a8faaa2de537d6ba05052a3776b5a1b73f8a3c3f5ed9d568489776a4
+    pfp 50e56dc1913571ff589425d2b059bddfc5e8a2b4bc22d3eb78cac75d1e0479a1
+    rlc 20acefdb6128a36275f4382425a109a7c9927f6053eab685bb51164ff1d18cfb
+    sdma 15d0d3626da7f2513f03b13bb7e02eeeeccab276276ae27d0b6067b5f25e9e95
+    sdma1 bd1c0b0f6a6a4f17ede034f2c844b6553fc444e08915c7bb500c09fde59d6255
+    EOF
+    rm -rf "$audit_dir" /tmp/ps5-initrd.contents
+
+    # Stage atomically, then pad only the EFI copy to the proven loader size.
+    target_size=54376639
+    current_size=$(stat -c %s "$initrd")
+    test "$current_size" -le "$target_size"
+    install -m 0644 "$initrd" /boot/efi/.initrd.img.new
+    truncate -s "$target_size" /boot/efi/.initrd.img.new
+    test "$(stat -c %s /boot/efi/.initrd.img.new)" = "$target_size"
+    cmp -n "$current_size" "$initrd" /boot/efi/.initrd.img.new
+    mv /boot/efi/.initrd.img.new /boot/efi/initrd.img
+
+    install -m 0644 "/boot/vmlinuz-$KVER" /boot/efi/.bzImage.new
+    test "$(sha256sum /boot/efi/.bzImage.new | awk '{print $1}')" = \
+        11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee34e99cde
+    mv /boot/efi/.bzImage.new /boot/efi/bzImage
+
+    apt-mark hold linux-ps5
+    apt-mark showhold | grep -qxF linux-ps5
+    systemctl enable grow-rootfs.service
+    systemctl enable systemd-resolved.service
+    systemctl enable ps5-ssh-host-keys.service
+    systemctl enable ps5fan.service
+    systemctl enable ps5-amdgpu-reprobe.service
+    systemctl enable ps5-boot-report.timer
+    # This is an offline image build; no systemd manager is running in the
+    # chroot. `systemctl enable` has already created the persistent symlinks.
+    test "$(systemctl is-enabled ps5-ssh-host-keys.service)" = enabled
+    test "$(systemctl is-enabled ps5fan.service)" = enabled
+    test "$(systemctl is-enabled ps5-amdgpu-reprobe.service)" = enabled
+    test "$(systemctl is-enabled ps5-boot-report.timer)" = enabled
+    test "$(sha256sum /usr/local/sbin/ps5-amdgpu-reprobe | awk '{print $1}')" = "$expected_reprobe"
+    test "$(sha256sum /etc/systemd/system/ps5-amdgpu-reprobe.service | awk '{print $1}')" = "$expected_reprobe_service"
+    test "$(sha256sum /usr/local/sbin/ps5-boot-report | awk '{print $1}')" = "$expected_report"
+    test "$(sha256sum /etc/systemd/system/ps5-boot-report.service | awk '{print $1}')" = "$expected_report_service"
+    test "$(sha256sum /etc/systemd/system/ps5-boot-report.timer | awk '{print $1}')" = "$expected_report_timer"
+    test "$(sha256sum /etc/systemd/system/ps5fan.service | awk '{print $1}')" = "$expected_fan_service"
+    test -x /usr/local/sbin/ps5_fan_max
+    test ! -e /usr/local/sbin/ps5_control
+    grep -qxF 'ExecStart=/usr/local/sbin/ps5_fan_max' \
+        /etc/systemd/system/ps5fan.service
+    grep -qxF 'ExecStart=/usr/bin/ssh-keygen -A' \
+        /etc/systemd/system/ps5-ssh-host-keys.service
+    grep -qxF 'RuntimeDirectory=sshd' \
+        /etc/systemd/system/ps5-ssh-host-keys.service
+    grep -qxF 'RuntimeDirectoryMode=0755' \
+        /etc/systemd/system/ps5-ssh-host-keys.service
+    grep -qxF 'ExecStart=/usr/sbin/sshd -t' \
+        /etc/systemd/system/ps5-ssh-host-keys.service
+    for unit in ssh.service ssh.socket; do
+        grep -qxF 'Requires=ps5-ssh-host-keys.service' \
+            "/etc/systemd/system/$unit.d/10-ps5-host-keys.conf"
+        grep -qxF 'After=ps5-ssh-host-keys.service' \
+            "/etc/systemd/system/$unit.d/10-ps5-host-keys.conf"
+    done
+    test "$(systemctl is-enabled NetworkManager.service)" = enabled
+    test "$(systemctl is-enabled ssh.service)" = enabled
+    systemctl is-enabled display-manager.service >/dev/null
+    test "$(readlink -f /etc/systemd/system/display-manager.service)" = \
+        /usr/lib/systemd/system/gdm.service
+    grep -qxF 'Wants=NetworkManager.service ssh.service' \
+        /etc/systemd/system/gdm.service.d/10-ps5-bringup.conf
+    grep -qxF 'After=NetworkManager.service ssh.service ps5fan.service ps5-amdgpu-reprobe.service' \
+        /etc/systemd/system/gdm.service.d/10-ps5-bringup.conf
+    test "$(readlink /etc/systemd/system/ps5-stage-firmware.service)" = /dev/null
+    test ! -e /etc/modules-load.d/moal
+    grep -qxF mts /etc/modules-load.d/ps5-ethernet.conf
+    test ! -e /etc/kernel/postinst.d/zz-update-boot
+    install -d -m 0755 /run/sshd
+    sshd -t
+    sshd -T > /tmp/ps5-sshd.effective
+    grep -qxF 'permitrootlogin no' /tmp/ps5-sshd.effective
+    grep -qxF 'pubkeyauthentication yes' /tmp/ps5-sshd.effective
+    grep -qxF 'passwordauthentication yes' /tmp/ps5-sshd.effective
+    grep -qxF 'permitemptypasswords no' /tmp/ps5-sshd.effective
+    grep -qxF 'kbdinteractiveauthentication no' /tmp/ps5-sshd.effective
+    grep -qxF 'allowusers ps5' /tmp/ps5-sshd.effective
+    shadow_hash=$(getent shadow ps5 | cut -d: -f2)
+    test -n "$shadow_hash"
+    case "$shadow_hash" in '!'*|'*'*) exit 1 ;; esac
+    rm -f /tmp/ps5-sshd.effective
+
+    rm -rf /opt/ps5-bootstrap
+    # Package installation generated host keys so sshd configuration could be
+    # validated above. Never copy those private identities into the image;
+    # ps5-ssh-host-keys.service creates a unique set on first boot.
+    rm -f /etc/ssh/ssh_host_*
+    if find /etc/ssh -maxdepth 1 -name 'ssh_host_*' -print -quit | grep -q .; then
+        echo "SSH host-key cleanup failed" >&2
+        exit 1
+    fi
+
+mappings:
+  architecture_map: debian

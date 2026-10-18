@@ -1,0 +1,24 @@
+#!/bin/sh
+# Wait for PSP/TA firmware to settle. Preserve a usable link; otherwise retry
+# the upstream connector re-detect workaround for a bounded interval.
+sleep 3
+for status_file in /sys/class/drm/card*-*/status; do
+    [ -e "$status_file" ] || continue
+    connector=${status_file%/status}
+    if [ "$(cat "$status_file" 2>/dev/null)" = connected ] &&
+       [ -s "$connector/modes" ]; then
+        continue
+    fi
+    for _ in 1 2 3 4 5 6; do
+        [ -w "$status_file" ] && printf detect > "$status_file"
+        sleep 2
+        if [ "$(cat "$status_file" 2>/dev/null)" = connected ] &&
+           [ -s "$connector/modes" ]; then
+            break
+        fi
+    done
+done
+for blank_file in /sys/class/graphics/fb*/blank; do
+    [ -w "$blank_file" ] && printf 0 > "$blank_file"
+done
+exit 0
