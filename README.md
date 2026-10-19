@@ -25,16 +25,24 @@ The [`Ubuntu 24.04 11.60 image`](.github/workflows/ubuntu2404-1160-image.yml) wo
 
 A CI image is a rebuild, so its raw-image hash will not match the Run 16 control or any other build. The parts that must match are `bzImage`, `cmdline.txt`, `vram.txt` and `kexec.sh`, byte for byte, and `initrd.img` at exactly 54,376,639 bytes. The build fails if any of them, or either verifier, fails. Every release lists the hashes for its own build in `SHA256SUMS` and `build-info.txt`.
 
-GitHub caps release files at 2 GiB, so the `.img.xz` is split into numbered parts (`ps5-ubuntu2404.img.xz.001`, `.002`, ...). Download every part plus `SHA256SUMS` into one folder, then:
+Download `ps5-ubuntu2404.img.xz` and `SHA256SUMS` from the release into one folder, then:
+
+```bash
+sha256sum -c --ignore-missing SHA256SUMS
+xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+```
+
+On macOS, check with `shasum -a 256 -c --ignore-missing SHA256SUMS` and flash to `/dev/rdiskN`. balenaEtcher and Raspberry Pi Imager can flash the `.img.xz` without unpacking it first. To check the decompressed image itself, compare `xz -dc ps5-ubuntu2404.img.xz | sha256sum` with the `ps5-ubuntu2404.img` line in `SHA256SUMS`.
+
+GitHub caps release files at 2 GiB. If a build's `.img.xz` is larger than 1,900 MiB, the release has numbered parts (`ps5-ubuntu2404.img.xz.001`, `.002`, ...) instead of one file. Download every part, then check and join them before flashing:
 
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS
 cat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz
 sha256sum -c --ignore-missing SHA256SUMS
-xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-The first check covers the downloaded parts and the second covers the joined file. On macOS, use `shasum -a 256 -c --ignore-missing SHA256SUMS` and flash to `/dev/rdiskN`. On Windows, join the parts with `copy /b ps5-ubuntu2404.img.xz.001 + ps5-ubuntu2404.img.xz.002 ps5-ubuntu2404.img.xz` (add each further part with another `+`). balenaEtcher and Raspberry Pi Imager can flash the joined `.img.xz` without unpacking it first. To check the decompressed image itself, compare `xz -dc ps5-ubuntu2404.img.xz | sha256sum` with the `ps5-ubuntu2404.img` line in `SHA256SUMS`.
+On Windows, join the parts with `copy /b ps5-ubuntu2404.img.xz.001 + ps5-ubuntu2404.img.xz.002 ps5-ubuntu2404.img.xz`, adding a `+` for each further part.
 
 The image is 16,777,216,000 bytes, which is more than many 16 GB USB drives hold. Use a 32 GB or larger drive. The root partition grows to fill the drive on first boot. The firmware 11.60 loader is not part of the image or the release.
 

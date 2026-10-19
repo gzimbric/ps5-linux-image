@@ -7,9 +7,10 @@ run-name: Ubuntu 24.04 11.60 image (${{ github.ref_name }})
 # xz-compressed image to a draft release. Nothing is public until the draft
 # is reviewed and published by hand.
 #
-# Release assets are capped at 2 GiB, so the .img.xz is split into numbered
-# parts. Release assets are used rather than workflow artifacts because
-# artifacts need a GitHub login to download and expire after 90 days at most.
+# Release assets are capped at 2 GiB, so an .img.xz larger than 1900 MiB is
+# split into numbered parts. Release assets are used rather than workflow
+# artifacts because artifacts need a GitHub login to download and expire
+# after 90 days at most.
 
 on:
   workflow_dispatch:
@@ -40,31 +41,33 @@ jobs:
     env:
       IMAGE: output/ps5-ubuntu2404.img
       DIST: dist
-      # Leave room for the kernel tree, the rootfs volume, the sparse raw
-      # image, Docker images and the compressed parts.
-      MIN_FREE_GB: 40
+      # The kernel tree, rootfs volume, sparse raw image, Docker images and
+      # compressed image peaked at about 13 GiB on the first CI build.
+      MIN_FREE_GB: 30
+      SPLIT_MIB: 1900
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Free disk space
+      - name: Check disk space
         run: |
           set -euo pipefail
-          echo "Before cleanup:"
-          df -h / /mnt 2>/dev/null || df -h /
-          sudo rm -rf \
-            /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
-            /usr/local/share/powershell /usr/local/share/chromium \
-            /usr/lib/jvm /opt/microsoft /opt/google /opt/az
-          docker system prune --all --force >/dev/null
-          echo "After cleanup:"
-          df -h / /mnt 2>/dev/null || df -h /
+          free_gb() { df -B1G --output=avail / | tail -n1 | tr -d ' '; }
+          df -h /
           echo "CPUs: $(nproc)"; free -h
-          free_gb=$(df -B1G --output=avail / | tail -n1 | tr -d ' ')
-          if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
-            echo "::error::only ${free_gb} GB free on /, need ${MIN_FREE_GB} GB"
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "Removing preinstalled toolchains to make room"
+            sudo rm -rf \
+              /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+              /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
+              /usr/local/share/powershell /usr/local/share/chromium \
+              /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+            docker system prune --all --force >/dev/null
+            df -h /
+          fi
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "::error::only $(free_gb) GB free on /, need $MIN_FREE_GB GB"
             exit 1
           fi
 
@@ -138,29 +141,36 @@ jobs:
           (cd "$boot" && sha256sum bzImage initrd.img cmdline.txt vram.txt kexec.sh) \
             > "$DIST/boot-files.sha256"
 
-      - name: Compress and split
+      - name: Compress
         run: |
           set -euo pipefail
           raw_sha=$(sha256sum "$IMAGE" | awk '{print $1}')
-          xz -T0 -6 -c "$IMAGE" \
-            | split --bytes=1900M --numeric-suffixes=1 --suffix-length=3 \
-                - "$DIST/ps5-ubuntu2404.img.xz."
+          xz -T0 -6 -c "$IMAGE" > "$DIST/ps5-ubuntu2404.img.xz"
 
           cd "$DIST"
-          parts=(ps5-ubuntu2404.img.xz.[0-9][0-9][0-9])
-          xz_sha=$(cat "${parts[@]}" | sha256sum | awk '{print $1}')
-          # The joined parts must decompress to the image that was verified.
-          roundtrip_sha=$(cat "${parts[@]}" | xz -T0 -dc | sha256sum | awk '{print $1}')
+          xz_sha=$(sha256sum ps5-ubuntu2404.img.xz | awk '{print $1}')
+          if [ "$(stat -c %s ps5-ubuntu2404.img.xz)" -gt $((SPLIT_MIB * 1024 * 1024)) ]; then
+            split --bytes="${SPLIT_MIB}M" --numeric-suffixes=1 --suffix-length=3 \
+              ps5-ubuntu2404.img.xz ps5-ubuntu2404.img.xz.
+            rm ps5-ubuntu2404.img.xz
+            files=(ps5-ubuntu2404.img.xz.[0-9][0-9][0-9])
+          else
+            files=(ps5-ubuntu2404.img.xz)
+          fi
+
+          # What gets uploaded must decompress to the image that was verified.
+          roundtrip_sha=$(cat "${files[@]}" | xz -T0 -dc | sha256sum | awk '{print $1}')
           if [ "$roundtrip_sha" != "$raw_sha" ]; then
-            echo "::error::decompressed parts do not match the raw image"
+            echo "::error::decompressed upload does not match the raw image"
             exit 1
           fi
 
           {
             echo "$raw_sha  ps5-ubuntu2404.img"
             echo "$xz_sha  ps5-ubuntu2404.img.xz"
-            sha256sum "${parts[@]}"
+            [ "${#files[@]}" -eq 1 ] || sha256sum "${files[@]}"
           } > SHA256SUMS
+          printf '%s\n' "${files[@]}" > upload-files.txt
           cat SHA256SUMS
           ls -l
 
@@ -170,6 +180,7 @@ jobs:
         run: |
           set -euo pipefail
           deb=$(ls linux-bin/ubuntu2404/linux-ps5_*.deb)
+          start_free=$(awk 'NR == 1 {print $2}' "$RUNNER_TEMP/disk-free-mb.log")
           min_free=$(awk '{print $2}' "$RUNNER_TEMP/disk-free-mb.log" | sort -n | head -n1)
           {
             echo "PS5 Ubuntu 24.04 image, firmware 11.60 tested envelope"
@@ -180,7 +191,7 @@ jobs:
             echo "Kernel:      $(cat linux-bin/ubuntu2404/VERSION)"
             echo "Profile ID:  $(./scripts/ubuntu2404-profile-id.sh)"
             echo "Raw image:   $(stat -c %s "$IMAGE") bytes"
-            echo "Lowest free disk on / during the build: ${min_free} MiB"
+            echo "Disk on /:   ${start_free} MiB free at start, ${min_free} MiB at the lowest point"
             echo
             echo "Kernel package:"
             sha256sum "$deb" | sed 's|linux-bin/ubuntu2404/||'
@@ -218,9 +229,17 @@ jobs:
             exit 1
           fi
           cd "$DIST"
-          parts=(ps5-ubuntu2404.img.xz.[0-9][0-9][0-9])
-          joined=$(printf '%s + ' "${parts[@]}")
-          joined=${joined% + }
+          mapfile -t files < upload-files.txt
+          if [ "${#files[@]}" -eq 1 ]; then
+            download="Download \`ps5-ubuntu2404.img.xz\` and \`SHA256SUMS\` into one folder, then on Linux:"
+            join_cmd=""
+            windows=""
+          else
+            joined=$(printf '%s + ' "${files[@]}")
+            download="The compressed image is too big for one release file, so it is split into ${#files[@]} parts. Download every \`ps5-ubuntu2404.img.xz.NNN\` part and \`SHA256SUMS\` into one folder, then on Linux:"
+            join_cmd=$'sha256sum -c --ignore-missing SHA256SUMS\ncat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz\n'
+            windows=" On Windows, join the parts with \`copy /b ${joined% + } ps5-ubuntu2404.img.xz\`."
+          fi
 
           cat > release-notes.md <<EOF
           Test build of the Ubuntu 24.04 image for PS5 firmware 11.60, built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL).
@@ -233,16 +252,14 @@ jobs:
 
           ### Download and flash
 
-          Download the ${#parts[@]} \`ps5-ubuntu2404.img.xz.NNN\` parts and \`SHA256SUMS\` into one folder, then on Linux:
+          $download
 
           \`\`\`
-          sha256sum -c --ignore-missing SHA256SUMS
-          cat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz
-          sha256sum -c --ignore-missing SHA256SUMS
+          ${join_cmd}sha256sum -c --ignore-missing SHA256SUMS
           xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
           \`\`\`
 
-          On macOS use \`shasum -a 256 -c --ignore-missing SHA256SUMS\`. On Windows join the parts with \`copy /b $joined ps5-ubuntu2404.img.xz\`. balenaEtcher and Raspberry Pi Imager can flash the joined \`.img.xz\` directly.
+          On macOS, check with \`shasum -a 256 -c --ignore-missing SHA256SUMS\`.$windows balenaEtcher and Raspberry Pi Imager can flash \`ps5-ubuntu2404.img.xz\` directly.
 
           The image is 16,777,216,000 bytes, which is larger than many 16 GB USB drives. Use a 32 GB drive or bigger. The root partition grows to fill the drive on first boot.
 
@@ -262,5 +279,5 @@ jobs:
           url=$(gh release create "$TAG" --draft --target "$GITHUB_SHA" \
             --title "Ubuntu 24.04 for PS5 firmware 11.60 ($TAG)" \
             --notes-file release-notes.md \
-            "${parts[@]}" SHA256SUMS build-info.txt)
+            "${files[@]}" SHA256SUMS build-info.txt)
           echo "Draft release: $url" | tee -a "$GITHUB_STEP_SUMMARY"
