@@ -1,0 +1,142 @@
+#!/bin/sh
+set -eu
+
+umask 077
+summary=
+bounded=
+temporary=
+# Called by the EXIT trap.
+# shellcheck disable=SC2329
+cleanup() {
+    [ -z "$temporary" ] || rm -f -- "$temporary" || true
+    [ -z "$summary" ] || rm -f -- "$summary" || true
+    [ -z "$bounded" ] || rm -f -- "$bounded" || true
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+summary=$(mktemp /run/ps5-boot-summary.XXXXXX)
+bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
+
+{
+    echo "PS5 CachyOS boot report"
+    printf 'generated='; date -u +%Y-%m-%dT%H:%M:%SZ
+    printf 'boot_id='; cat /proc/sys/kernel/random/boot_id
+    printf 'uname='; uname -a
+    printf 'cmdline='; cat /proc/cmdline
+    printf 'uptime='; cat /proc/uptime
+
+    echo
+    echo "[mounts]"
+    findmnt -rno SOURCE,TARGET,FSTYPE,OPTIONS / 2>&1 || true
+    findmnt -rno SOURCE,TARGET,FSTYPE,OPTIONS /boot/efi 2>&1 || true
+    lsblk -o NAME,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINTS 2>&1 || true
+
+    echo
+    echo "[boot-files]"
+    for boot_file in /boot/efi/bzImage /boot/efi/initrd.img /boot/efi/cmdline.txt; do
+        if [ -f "$boot_file" ]; then
+            printf '%s size=%s sha256=%s\n' "$boot_file" \
+                "$(stat -c %s "$boot_file" 2>/dev/null || echo unknown)" \
+                "$(sha256sum "$boot_file" 2>/dev/null | cut -d ' ' -f 1)"
+        else
+            printf '%s missing\n' "$boot_file"
+        fi
+    done
+
+    echo
+    echo "[network]"
+    ip -brief link 2>&1 || true
+    ip -brief address 2>&1 || true
+    ip route 2>&1 || true
+    nmcli --terse --fields DEVICE,TYPE,STATE,CONNECTION device status 2>&1 || true
+
+    echo
+    echo "[wifi]"
+    lsmod 2>&1 | grep -E '^(moal|mlan|cfg80211)[[:space:]]' || \
+        echo "moal/mlan/cfg80211: not loaded"
+    printf 'modinfo -n moal: '; modinfo -n moal 2>&1 || true
+    printf 'tainted='; cat /proc/sys/kernel/tainted 2>&1 || true
+    nmcli device 2>&1 || true
+
+    echo
+    echo "[pci]"
+    lspci -nnk 2>&1 || true
+
+    echo
+    echo "[display]"
+    for status_file in /sys/class/drm/card*-*/status; do
+        [ -e "$status_file" ] || continue
+        connector=${status_file%/status}
+        printf '%s=' "$status_file"
+        cat "$status_file" 2>/dev/null || true
+        if [ -e "$connector/modes" ]; then
+            printf '%s:\n' "$connector/modes"
+            cat "$connector/modes" 2>/dev/null || true
+        fi
+    done
+    for state_file in /sys/class/graphics/fb*/name /sys/class/graphics/fb*/modes; do
+        [ -e "$state_file" ] || continue
+        printf '%s:\n' "$state_file"
+        cat "$state_file" 2>/dev/null || true
+    done
+
+    echo
+    echo "[temperatures]"
+    sensors 2>&1 || true
+
+    echo
+    echo "[services]"
+    systemctl --no-pager --full status \
+        NetworkManager.service sshd.service getty@tty1.service \
+        first-boot.service ps5fan.service ps5-amdgpu-reprobe.service \
+        ps5-boot-report.timer 2>&1 || true
+    systemctl --no-pager --full --failed 2>&1 || true
+    systemctl --no-pager --full list-jobs 2>&1 || true
+} > "$summary" 2>&1
+
+# Preserve the bring-up summary even if a noisy journal has very large records.
+head -c 393216 "$summary" > "$bounded"
+
+{
+    printf '\n[kernel-tail; final 256 KiB]\n'
+    dmesg --color=never 2>&1 | tail -n 500 | tail -c 262144
+    printf '\n[journal-tail; final 383 KiB]\n'
+    journalctl -b --no-pager -n 800 2>&1 | tail -c 392192
+} >> "$bounded"
+
+test -s "$bounded"
+test "$(wc -c < "$bounded")" -le 1048576
+
+publish_report() {
+    destination=$1
+    temporary=$(mktemp "${destination}.new.XXXXXX") || return 1
+    if ! install -m 0600 "$bounded" "$temporary"; then
+        rm -f "$temporary"
+        temporary=
+        return 1
+    fi
+    if ! sync -f "$temporary"; then
+        rm -f "$temporary"
+        temporary=
+        return 1
+    fi
+    if ! mv -f "$temporary" "$destination"; then
+        rm -f "$temporary"
+        temporary=
+        return 1
+    fi
+    temporary=
+    sync -f "$destination" || \
+        echo "Could not flush $destination after rename" >&2
+}
+
+publish_report /var/log/ps5-boot-report.txt || \
+    echo "Could not publish /var/log/ps5-boot-report.txt" >&2
+
+if findmnt -rn /boot/efi >/dev/null 2>&1 && [ -w /boot/efi ]; then
+    publish_report /boot/efi/ps5-boot-report.txt || \
+        echo "Could not publish /boot/efi/ps5-boot-report.txt" >&2
+fi
+
+exit 0

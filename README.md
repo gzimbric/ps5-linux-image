@@ -17,7 +17,7 @@ The source-clean kernel/package build and fresh image assembly from this public 
 
 The successful control image was 16,777,216,000 bytes (16,000 MiB), which is the default for this profile. The matching firmware 11.60 USB and boot procedure is documented in the [porting guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-run16-usb.md).
 
-This branch publishes the source and build instructions, not a binary image release. Review the licenses of the inherited builder and installed distribution packages before redistributing a built image.
+The branch itself holds only source and build instructions. Test images built by CI are covered in [CachyOS for 11.60](#cachyos-for-1160). Review the licenses of the inherited builder and installed distribution packages before redistributing a built image.
 
 ### First login and SSH policy
 
@@ -117,6 +117,18 @@ If the ext4 root partition is also mounted, pass it as the second argument to ve
 ```bash
 ./scripts/verify-ubuntu2404-boot.sh /path/to/mounted/boot /path/to/mounted/root
 ```
+
+## CachyOS for 11.60
+
+The `cachyos1160` profile applies the changes the official `ps5-cachyos` image (Steam Gaming Mode and KDE Plasma) needs to boot on firmware 11.60. It does not rebuild the kernel or the root filesystem. The script downloads the official image, rebuilds the initramfs from the image's own packages, writes the 11.60 boot files, and applies a short, pinned list of root changes. It must run as root on Linux x86_64:
+
+```bash
+sudo ./scripts/build-cachyos1160-image.sh
+```
+
+The output is `output/ps5-cachyos1160.img` (12,582,912,000 bytes) plus `output/cachyos1160-root-changes.txt`, which lists every root path the build added, changed or removed. The [profile README](distros/cachyos1160/README.md) explains each change, the pinned boot files, and what the public image leaves out compared with the private test image. That private image, with the same boot files, booted on an 11.60 console. An image built from this public profile has not been booted on hardware yet.
+
+The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow runs the same script on a GitHub-hosted x86_64 runner, checks the five FAT boot files again, and attaches the compressed image to a draft release. It runs when a tag matching `cachyos1160-image-*` is pushed. It can also be started by hand from the Actions tab once the workflow is on the default branch.
 
 ## Prerequisites
 
@@ -265,6 +277,7 @@ distros/
   ubuntu2604/                   # Ubuntu 26.04 (Resolute)
   arch/                         # Arch Linux
   cachyos/                      # CachyOS repos + Gamescope/Steam
+  cachyos1160/                  # Changes that make the official CachyOS image boot on firmware 11.60
   shared/                       # Kernel postinst hooks (single + multi)
 boot/
   cmdline.txt                   # Kernel cmdline template (__DISTRO__ placeholder)
@@ -272,6 +285,7 @@ boot/
   kexec.sh                      # Single-image kexec helper
   kexec-{ubuntu2604,arch,cachyos}.sh
 scripts/
+  build-cachyos1160-image.sh    # Build the CachyOS firmware 11.60 image from the official image
   ubuntu2404-profile-id.sh     # Hash the complete Ubuntu 24.04 build recipe
   verify-ubuntu2404-kernel-deb.sh # Validate the exact semantic kernel package
   verify-ubuntu2404-boot.sh     # Check flashed boot files against the tested envelope

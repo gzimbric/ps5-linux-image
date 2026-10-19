@@ -11,3 +11,4 @@ boot/kexec*.sh text eol=lf
 distros/**/grow-rootfs text eol=lf
 distros/shared/zz-update-boot* text eol=lf
 docker/** text eol=lf
+distros/cachyos1160/** text eol=lf

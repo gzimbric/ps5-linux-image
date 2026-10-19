@@ -1,0 +1,11 @@
+[Unit]
+Description=Capture a bounded PS5 boot report
+After=local-fs.target NetworkManager.service sshd.service ps5fan.service ps5-amdgpu-reprobe.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ps5-boot-report
+TimeoutStartSec=25
+TimeoutStopSec=5
+Nice=10
+IOSchedulingClass=idle

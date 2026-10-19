@@ -1,0 +1,16 @@
+# PS5 11.60 boot-file pin (Run 18). linux-ps5's install script reruns mkinitcpio
+# and copies an unpadded initrd and bzImage onto /boot/efi; the loader's exact-size
+# gate would then refuse the next boot. Abort any transaction that installs,
+# upgrades or removes linux-ps5. Companion: IgnorePkg = linux-ps5 in /etc/pacman.conf.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = linux-ps5
+
+[Action]
+Description = Refusing to change linux-ps5 (PS5 loader-gated boot files are pinned)
+When = PreTransaction
+Exec = /usr/bin/false
+AbortOnFail

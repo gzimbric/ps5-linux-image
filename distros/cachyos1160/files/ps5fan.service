@@ -1,0 +1,13 @@
+[Unit]
+Description=Set PS5 fan to maximum for bring-up testing
+After=systemd-udev-trigger.service
+Before=gdm3.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/timeout 30 /bin/sh -c 'while [ ! -c /dev/icc ]; do sleep 1; done'
+ExecStart=/usr/local/sbin/ps5_fan_max
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

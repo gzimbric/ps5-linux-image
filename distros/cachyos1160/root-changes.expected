@@ -1,0 +1,39 @@
+# Every root filesystem (p1) change scripts/build-cachyos1160-image.sh is
+# allowed to make to the official ps5-cachyos image. The build compares the
+# full before/after file manifests and stops unless the difference is exactly
+# this list.
+#
+# Columns: status path type mode uid gid size sha256-or-link-target
+# Status: A added, M modified (new values), R removed (old values).
+# ps5_fan_max is compiled on the build host, so its size and hash are filled
+# in from that build.
+A etc/hostname f 0644 0 0 4 e2871a86682961361a3d9c165fc284f2b1a4345940a597c1d3ffb6695c578a24
+M etc/hosts f 0644 0 0 133 1709dde27b0fd66472c71ffb4499307e20bee4f6cea47bc61f7a339b2dc67b5e
+A etc/localtime l 0777 0 0 - /usr/share/zoneinfo/UTC
+A etc/modprobe.d/ps5-amdgpu.conf f 0644 0 0 195 51dbae6f372fa1f5bceee2fd95403042bb6954d29b3f9db2a11c769dd41fc677
+A etc/modprobe.d/ps5-iw620-noautoload.conf f 0644 0 0 30 e12a72fdbfe929e6628c6e68bfb398291f84503f47715248b1146a2ff943fe88
+A etc/modules-load.d/ps5-ethernet.conf f 0644 0 0 4 2e77b7f98104022b212c2f5739f7cd221037444f417be9423c701f8d6e5b2d01
+M etc/pacman.conf f 0644 0 0 3019 9aa21b480b54adea829ee5b69f63ad421807a9d313fa0a52b23ad6135637c139
+A etc/pacman.d/hooks d 0755 0 0 - -
+A etc/pacman.d/hooks/00-ps5-linux-ps5-guard.hook f 0644 0 0 582 948992b4e5135b6ca72f183ffdc040748fc2448e5773357483d97890c7deb12a
+A etc/ps5-first-boot-done f 0644 0 0 0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+A etc/systemd/system/multi-user.target.wants/ps5-amdgpu-reprobe.service l 0777 0 0 - /etc/systemd/system/ps5-amdgpu-reprobe.service
+A etc/systemd/system/multi-user.target.wants/ps5fan.service l 0777 0 0 - /etc/systemd/system/ps5fan.service
+A etc/systemd/system/ps5-amdgpu-reprobe.service f 0644 0 0 342 2409fd812118088098ce6b740acb913d872c1df1efdb38e6254d4d388cabe72e
+A etc/systemd/system/ps5-boot-report.service f 0644 0 0 286 f6c4f52e1c4a2eceb1ca7f890249026fe96ab549e6bb05739d056bec7d36dc85
+A etc/systemd/system/ps5-boot-report.timer f 0644 0 0 171 9074e18c67eaec808a8934417573020249d2c3938b8688fb9ef3b36307c04fec
+A etc/systemd/system/ps5fan.service f 0644 0 0 326 19711fd4b0d001a0e4218e6051341b63cff6369420f5b999c4868d731c1d9404
+R etc/systemd/system/sysinit.target.wants/ps5-stage-firmware.service l 0777 0 0 - ../ps5-stage-firmware.service
+A etc/systemd/system/timers.target.wants d 0755 0 0 - -
+A etc/systemd/system/timers.target.wants/ps5-boot-report.timer l 0777 0 0 - /etc/systemd/system/ps5-boot-report.timer
+A usr/lib/firmware/amdgpu/cyan_skillfish2_ce.bin f 0644 0 0 263296 5946efbf7e46ccfe7e9f965da56c35b1187469d1c1a49c8a9eff433eb3ab4723
+A usr/lib/firmware/amdgpu/cyan_skillfish2_me.bin f 0644 0 0 263424 d4ed4d968de0d7720f7c8215d42fdae727bf99cdf43cee6f8f864dc2584b17e2
+A usr/lib/firmware/amdgpu/cyan_skillfish2_mec.bin f 0644 0 0 268592 b1c1f843a8faaa2de537d6ba05052a3776b5a1b73f8a3c3f5ed9d568489776a4
+A usr/lib/firmware/amdgpu/cyan_skillfish2_mec2.bin l 0777 0 0 - cyan_skillfish2_mec.bin
+A usr/lib/firmware/amdgpu/cyan_skillfish2_pfp.bin f 0644 0 0 263424 50e56dc1913571ff589425d2b059bddfc5e8a2b4bc22d3eb78cac75d1e0479a1
+A usr/lib/firmware/amdgpu/cyan_skillfish2_rlc.bin f 0644 0 0 25344 20acefdb6128a36275f4382425a109a7c9927f6053eab685bb51164ff1d18cfb
+A usr/lib/firmware/amdgpu/cyan_skillfish2_sdma.bin f 0644 0 0 33792 15d0d3626da7f2513f03b13bb7e02eeeeccab276276ae27d0b6067b5f25e9e95
+A usr/lib/firmware/amdgpu/cyan_skillfish2_sdma1.bin f 0644 0 0 33792 bd1c0b0f6a6a4f17ede034f2c844b6553fc444e08915c7bb500c09fde59d6255
+A usr/local/sbin/ps5-amdgpu-reprobe f 0755 0 0 797 6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
+A usr/local/sbin/ps5-boot-report f 0755 0 0 4281 cc058e840186112f33757b7107c4188178af036fb4fcf95a3788b1e100da3c76
+A usr/local/sbin/ps5_fan_max f 0755 0 0 @PS5_FAN_MAX_SIZE@ @PS5_FAN_MAX_SHA256@
