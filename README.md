@@ -17,7 +17,26 @@ The source-clean kernel/package build and fresh image assembly from this public 
 
 The successful control image was 16,777,216,000 bytes (16,000 MiB), which is the default for this profile. The matching firmware 11.60 USB and boot procedure is documented in the [porting guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-run16-usb.md).
 
-This branch publishes the source and build instructions, not a binary image release. Review the licenses of the inherited builder and installed distribution packages before redistributing a built image.
+The branch itself holds only source and build instructions. Test images built by CI are covered in [Prebuilt test image](#prebuilt-test-image). Review the licenses of the inherited builder and installed distribution packages before redistributing a built image.
+
+### Prebuilt test image
+
+The [`Ubuntu 24.04 11.60 image`](.github/workflows/ubuntu2404-1160-image.yml) workflow runs the two commands above on a GitHub-hosted x86_64 runner. It then runs both verifiers, checks the five FAT boot files against the [tested boot envelope](#tested-boot-envelope), and attaches the compressed image to a draft release. Testers can only see it after the draft has been reviewed and published. The workflow is started by hand from the Actions tab, or by pushing a tag that matches `ubuntu2404-1160-image-*`.
+
+A CI image is a rebuild, so its raw-image hash will not match the Run 16 control or any other build. The parts that must match are `bzImage`, `cmdline.txt`, `vram.txt` and `kexec.sh`, byte for byte, and `initrd.img` at exactly 54,376,639 bytes. The build fails if any of them, or either verifier, fails. Every release lists the hashes for its own build in `SHA256SUMS` and `build-info.txt`.
+
+GitHub caps release files at 2 GiB, so the `.img.xz` is split into numbered parts (`ps5-ubuntu2404.img.xz.001`, `.002`, ...). Download every part plus `SHA256SUMS` into one folder, then:
+
+```bash
+sha256sum -c --ignore-missing SHA256SUMS
+cat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz
+sha256sum -c --ignore-missing SHA256SUMS
+xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+```
+
+The first check covers the downloaded parts and the second covers the joined file. On macOS, use `shasum -a 256 -c --ignore-missing SHA256SUMS` and flash to `/dev/rdiskN`. On Windows, join the parts with `copy /b ps5-ubuntu2404.img.xz.001 + ps5-ubuntu2404.img.xz.002 ps5-ubuntu2404.img.xz` (add each further part with another `+`). balenaEtcher and Raspberry Pi Imager can flash the joined `.img.xz` without unpacking it first. To check the decompressed image itself, compare `xz -dc ps5-ubuntu2404.img.xz | sha256sum` with the `ps5-ubuntu2404.img` line in `SHA256SUMS`.
+
+The image is 16,777,216,000 bytes, which is more than many 16 GB USB drives hold. Use a 32 GB or larger drive. The root partition grows to fill the drive on first boot. The firmware 11.60 loader is not part of the image or the release.
 
 ### First login and SSH policy
 

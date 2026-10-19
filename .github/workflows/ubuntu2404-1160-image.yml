@@ -1,0 +1,266 @@
+name: Ubuntu 24.04 11.60 image
+run-name: Ubuntu 24.04 11.60 image (${{ github.ref_name }})
+
+# Builds the firmware 11.60 tested-envelope Ubuntu 24.04 image on a
+# GitHub-hosted x86_64 runner with the two commands from the README, runs the
+# repository's verifiers, checks the pinned FAT boot files, and attaches the
+# xz-compressed image to a draft release. Nothing is public until the draft
+# is reviewed and published by hand.
+#
+# Release assets are capped at 2 GiB, so the .img.xz is split into numbered
+# parts. Release assets are used rather than workflow artifacts because
+# artifacts need a GitHub login to download and expire after 90 days at most.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag for the draft release (created when the draft is published). Default: ubuntu2404-1160-build-<run number>'
+        type: string
+        default: ''
+  push:
+    tags:
+      - 'ubuntu2404-1160-image-*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ubuntu2404-1160-image
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      IMAGE: output/ps5-ubuntu2404.img
+      DIST: dist
+      # Leave room for the kernel tree, the rootfs volume, the sparse raw
+      # image, Docker images and the compressed parts.
+      MIN_FREE_GB: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          echo "Before cleanup:"
+          df -h / /mnt 2>/dev/null || df -h /
+          sudo rm -rf \
+            /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
+            /usr/local/share/powershell /usr/local/share/chromium \
+            /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+          docker system prune --all --force >/dev/null
+          echo "After cleanup:"
+          df -h / /mnt 2>/dev/null || df -h /
+          echo "CPUs: $(nproc)"; free -h
+          free_gb=$(df -B1G --output=avail / | tail -n1 | tr -d ' ')
+          if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
+            echo "::error::only ${free_gb} GB free on /, need ${MIN_FREE_GB} GB"
+            exit 1
+          fi
+
+      - name: Start disk sampler
+        run: |
+          nohup bash -c 'while true; do
+            echo "$(date -u +%H:%M:%S) $(df -B1M --output=avail / | tail -n1 | tr -d " ")"
+            sleep 20
+          done' > "$RUNNER_TEMP/disk-free-mb.log" 2>&1 &
+
+      - name: Build kernel package
+        run: ./build_image.sh --clean --kernel-only --distro ubuntu2404
+
+      - name: Build image
+        run: |
+          df -h /
+          ./build_image.sh --distro ubuntu2404
+          df -h /
+
+      - name: Verify kernel package
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(linux-bin/ubuntu2404/linux-ps5_*.deb)
+          if [ "${#debs[@]}" -ne 1 ]; then
+            echo "::error::expected one kernel package, found ${#debs[@]}"
+            exit 1
+          fi
+          ./scripts/verify-ubuntu2404-kernel-deb.sh "${debs[0]}"
+
+      - name: Verify image
+        run: ./scripts/verify-ubuntu2404-boot.sh --image "$IMAGE"
+
+      - name: Check pinned boot files
+        run: |
+          set -euo pipefail
+          test "$(stat -c %s "$IMAGE")" = 16777216000
+
+          # Partition 2 is the FAT boot partition.
+          read -r start sectors < <(
+            partx --noheadings --output START,SECTORS --nr 2 "$IMAGE")
+          boot=$(mktemp -d)
+          sudo mount -t vfat \
+            -o "ro,loop,offset=$((start * 512)),sizelimit=$((sectors * 512))" \
+            "$IMAGE" "$boot"
+          trap 'sudo umount "$boot"' EXIT
+
+          failed=0
+          check() {
+            local name=$1 size=$2 hash=${3:-} actual_size actual_hash
+            actual_size=$(stat -c %s "$boot/$name")
+            actual_hash=$(sha256sum "$boot/$name" | awk '{print $1}')
+            printf '%-12s %10s  %s\n' "$name" "$actual_size" "$actual_hash"
+            if [ "$actual_size" != "$size" ]; then
+              echo "::error::$name is $actual_size bytes, expected $size"
+              failed=1
+            fi
+            if [ -n "$hash" ] && [ "$actual_hash" != "$hash" ]; then
+              echo "::error::$name SHA-256 is $actual_hash, expected $hash"
+              failed=1
+            fi
+          }
+          check bzImage     12702720 11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee34e99cde
+          check initrd.img  54376639
+          check cmdline.txt 121      6b3c09112fe049d3cbeada65fb3c82bb0f5fcaddce6c0709051df3d9f5a79f6d
+          check vram.txt    11       bc4642feb06a4cc6d10d5865e321efaad7ab3f3f1d5d025151b79978164310a0
+          check kexec.sh    136      0f26e09911a8a2bc9912d7c77fee6ac09ccd18a820086cb103be92de081b6c52
+          [ "$failed" -eq 0 ]
+
+          mkdir -p "$DIST"
+          (cd "$boot" && sha256sum bzImage initrd.img cmdline.txt vram.txt kexec.sh) \
+            > "$DIST/boot-files.sha256"
+
+      - name: Compress and split
+        run: |
+          set -euo pipefail
+          raw_sha=$(sha256sum "$IMAGE" | awk '{print $1}')
+          xz -T0 -6 -c "$IMAGE" \
+            | split --bytes=1900M --numeric-suffixes=1 --suffix-length=3 \
+                - "$DIST/ps5-ubuntu2404.img.xz."
+
+          cd "$DIST"
+          parts=(ps5-ubuntu2404.img.xz.[0-9][0-9][0-9])
+          xz_sha=$(cat "${parts[@]}" | sha256sum | awk '{print $1}')
+          # The joined parts must decompress to the image that was verified.
+          roundtrip_sha=$(cat "${parts[@]}" | xz -T0 -dc | sha256sum | awk '{print $1}')
+          if [ "$roundtrip_sha" != "$raw_sha" ]; then
+            echo "::error::decompressed parts do not match the raw image"
+            exit 1
+          fi
+
+          {
+            echo "$raw_sha  ps5-ubuntu2404.img"
+            echo "$xz_sha  ps5-ubuntu2404.img.xz"
+            sha256sum "${parts[@]}"
+          } > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+
+      - name: Write build info
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          deb=$(ls linux-bin/ubuntu2404/linux-ps5_*.deb)
+          min_free=$(awk '{print $2}' "$RUNNER_TEMP/disk-free-mb.log" | sort -n | head -n1)
+          {
+            echo "PS5 Ubuntu 24.04 image, firmware 11.60 tested envelope"
+            echo
+            echo "Commit:      $GITHUB_SHA ($GITHUB_REF_NAME)"
+            echo "Build run:   $RUN_URL"
+            echo "Finished:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Kernel:      $(cat linux-bin/ubuntu2404/VERSION)"
+            echo "Profile ID:  $(./scripts/ubuntu2404-profile-id.sh)"
+            echo "Raw image:   $(stat -c %s "$IMAGE") bytes"
+            echo "Lowest free disk on / during the build: ${min_free} MiB"
+            echo
+            echo "Kernel package:"
+            sha256sum "$deb" | sed 's|linux-bin/ubuntu2404/||'
+            echo
+            echo "FAT boot partition files:"
+            cat "$DIST/boot-files.sha256"
+            echo
+            echo "Release files:"
+            cat "$DIST/SHA256SUMS"
+          } > "$DIST/build-info.txt"
+          cat "$DIST/build-info.txt"
+          { echo '```'; cat "$DIST/build-info.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload checksums
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu2404-1160-checksums
+          path: |
+            dist/SHA256SUMS
+            dist/boot-files.sha256
+            dist/build-info.txt
+          if-no-files-found: ignore
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag || format('ubuntu2404-1160-build-{0}', github.run_number) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::invalid release tag: $TAG"
+            exit 1
+          fi
+          cd "$DIST"
+          parts=(ps5-ubuntu2404.img.xz.[0-9][0-9][0-9])
+          joined=$(printf '%s + ' "${parts[@]}")
+          joined=${joined% + }
+
+          cat > release-notes.md <<EOF
+          Test build of the Ubuntu 24.04 image for PS5 firmware 11.60, built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL).
+
+          This is a CI rebuild of the tested profile, not the Run 16 control image. The build checked that the boot files on the FAT partition match the tested envelope. The root filesystem, and so the raw image hash, differs from build to build.
+
+          The firmware 11.60 loader is not part of this release. Use the loader build you were given for testing.
+
+          Login is \`ps5\` / \`ubuntu\`. Change the password after the first boot.
+
+          ### Download and flash
+
+          Download the ${#parts[@]} \`ps5-ubuntu2404.img.xz.NNN\` parts and \`SHA256SUMS\` into one folder, then on Linux:
+
+          \`\`\`
+          sha256sum -c --ignore-missing SHA256SUMS
+          cat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz
+          sha256sum -c --ignore-missing SHA256SUMS
+          xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+          \`\`\`
+
+          On macOS use \`shasum -a 256 -c --ignore-missing SHA256SUMS\`. On Windows join the parts with \`copy /b $joined ps5-ubuntu2404.img.xz\`. balenaEtcher and Raspberry Pi Imager can flash the joined \`.img.xz\` directly.
+
+          The image is 16,777,216,000 bytes, which is larger than many 16 GB USB drives. Use a 32 GB drive or bigger. The root partition grows to fill the drive on first boot.
+
+          ### Checksums
+
+          \`\`\`
+          $(cat SHA256SUMS)
+          \`\`\`
+
+          FAT boot partition files:
+
+          \`\`\`
+          $(cat boot-files.sha256)
+          \`\`\`
+          EOF
+
+          url=$(gh release create "$TAG" --draft --target "$GITHUB_SHA" \
+            --title "Ubuntu 24.04 for PS5 firmware 11.60 ($TAG)" \
+            --notes-file release-notes.md \
+            "${parts[@]}" SHA256SUMS build-info.txt)
+          echo "Draft release: $url" | tee -a "$GITHUB_STEP_SUMMARY"
