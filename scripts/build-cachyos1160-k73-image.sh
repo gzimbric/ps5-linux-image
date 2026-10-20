@@ -42,8 +42,8 @@ ROOT_VMLINUZ_717_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee
 ROOT_INITRD_717_SHA256=ba6dd1d0e69149e6be60bfd655b4bfc8cac0eee546e1ba478f3bdd1240965a56
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-2"
-PACKAGE_FILE=linux-ps5-7.3.0-2-x86_64.pkg.tar.zst
+NEW_PACKAGE="linux-ps5 7.3.0-3"
+PACKAGE_FILE=linux-ps5-7.3.0-3-x86_64.pkg.tar.zst
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
 
 # The FAT partition holds these five files. bzImage and initrd.img come from
@@ -66,6 +66,7 @@ OLD_FAT_BZIMAGE_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee3
 # Bluetooth helper the base image runs at boot.
 BT_QUIET_SHA256=d31222ead065ee2ab6fd55edda285741814bb8a470c9c26d355963ab39b46240
 BT_QUIET_SERVICE_SHA256=4cc7b16adbc3ef4d4a132d55e7e0bacd4e9bc9192096507d6e125301d821f32c
+OLD_SESSION_SELECT_SHA256=f6fb96619489228225ccbc2d7f782d5791c5a2e6d9f66f5d0f843d64d35d1f74
 
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PROFILE=$REPO/distros/cachyos1160-k73
@@ -140,7 +141,7 @@ done
 [[ $(uname -m) == x86_64 ]] || die "run on x86_64 (or in a linux/amd64 container)"
 
 required=(awk blkid chroot cmp dd diff e2fsck find fsck.fat gcc install join
-  unshare losetup mount mountpoint nproc od partx readelf realpath sed
+  unshare losetup mount mountpoint nproc od partx python3 readelf realpath sed
   sha256sum sort stat umount xargs xz)
 [[ -n $base_xz ]] || required+=(curl)
 for cmd in "${required[@]}"; do
@@ -164,17 +165,23 @@ for f in README.md cmdline.txt root-changes.expected config/ps5-amdgpu.conf \
   files/ps5-boot-report files/ps5-boot-report.service \
   files/ps5-boot-report.timer files/ps5_fan_max.c files/ps5fan.service \
   files/ps5-iw620.conf files/ps5-iw620-firmware files/ps5-iw620-firmware.service \
+  files/20-ps5-iw620.conf files/ps5-performance files/ps5-performance.service \
+  files/ps5-session-switch-listener files/ps5-session-switch-listener.service \
   files/ps5-bt-quiet files/ps5-bt-quiet.service \
   files/ps5-1160-check-boot-files files/ps5-update-boot-files \
   files/05-ps5-boot-files-precheck.hook files/95-ps5-boot-files.hook; do
   [[ -f $PROFILE/$f ]] || die "profile file missing: distros/cachyos1160-k73/$f"
 done
+[[ -f $REPO/distros/cachyos/files/steamos-session-select ]] ||
+  die "profile file missing: distros/cachyos/files/steamos-session-select"
 expect_file "$PROFILE/cmdline.txt" "${FAT_SIZE[cmdline.txt]}" \
   "${FAT_SHA256[cmdline.txt]}" "profile cmdline.txt"
 ! grep -q nokaslr "$PROFILE/cmdline.txt" || die "cmdline.txt must not contain nokaslr"
 expect_sha "$PROFILE/files/ps5-bt-quiet" "$BT_QUIET_SHA256" "profile ps5-bt-quiet"
 expect_sha "$PROFILE/files/ps5-bt-quiet.service" "$BT_QUIET_SERVICE_SHA256" \
   "profile ps5-bt-quiet.service"
+PYTHONDONTWRITEBYTECODE=1 \
+  python3 "$PROFILE/files/ps5-session-switch-listener" --self-test
 
 mkdir -p -- "$work" "$out_dir"
 R=$work/root   # root filesystem, mounted read-write for the chroot
@@ -394,6 +401,12 @@ add_file() { # mode source path-in-root
   [[ ! -e $R/$3 && ! -L $R/$3 ]] || die "/$3 already exists"
   install -o 0 -g 0 -m "$1" -- "$2" "$R/$3"
 }
+replace_file() { # mode source path-in-root expected-old-sha256
+  [[ -f $R/$3 && ! -L $R/$3 ]] || die "/$3 is missing or not a regular file"
+  expect_sha "$R/$3" "$4" "/$3 before replacement"
+  install -o 0 -g 0 -m "$1" -- "$2" "$R/$3.new"
+  mv -f -- "$R/$3.new" "$R/$3"
+}
 add_link() { # target path-in-root
   [[ ! -e $R/$2 && ! -L $R/$2 ]] || die "/$2 already exists"
   ln -s -- "$1" "$R/$2"
@@ -440,6 +453,8 @@ add_dir "$updates/ps5-iw620"
 add_file 0644 "$iw620/mlan.ko" "$updates/ps5-iw620/mlan.ko"
 add_file 0644 "$iw620/moal.ko" "$updates/ps5-iw620/moal.ko"
 add_file 0644 "$PROFILE/files/ps5-iw620.conf" etc/modprobe.d/ps5-iw620.conf
+add_file 0644 "$PROFILE/files/20-ps5-iw620.conf" \
+  etc/NetworkManager/conf.d/20-ps5-iw620.conf
 add_file 0755 "$PROFILE/files/ps5-iw620-firmware" usr/local/sbin/ps5-iw620-firmware
 add_file 0644 "$PROFILE/files/ps5-iw620-firmware.service" \
   etc/systemd/system/ps5-iw620-firmware.service
@@ -479,7 +494,7 @@ add_file 0755 "$PROFILE/files/ps5-bt-quiet" usr/local/sbin/ps5-bt-quiet
 add_file 0644 "$PROFILE/files/ps5-bt-quiet.service" etc/systemd/system/ps5-bt-quiet.service
 add_link ../ps5-bt-quiet.service etc/systemd/system/multi-user.target.wants/ps5-bt-quiet.service
 
-log "Frequency drivers (installed, not loaded at boot)"
+log "Frequency drivers and guarded startup"
 for module in ps5_cpufreq ps5_gpufreq; do
   file=$(module_file "$module")
   [[ $file == "/usr/lib/modules/$KVER/kernel/drivers/"*"/${module//_/-}.ko" ]] ||
@@ -492,6 +507,11 @@ for module in ps5_cpufreq ps5_gpufreq; do
   fi
   echo "ok  $module in $file, no alias, not in modules-load.d"
 done
+add_file 0755 "$PROFILE/files/ps5-performance" usr/local/sbin/ps5-performance
+add_file 0644 "$PROFILE/files/ps5-performance.service" \
+  etc/systemd/system/ps5-performance.service
+add_link /etc/systemd/system/ps5-performance.service \
+  etc/systemd/system/multi-user.target.wants/ps5-performance.service
 
 log "First-boot defaults (hostname ps5, UTC)"
 add_file 0644 "$PROFILE/files/hostname" etc/hostname
@@ -516,6 +536,27 @@ add_file 0644 "$PROFILE/files/ps5-amdgpu-reprobe.service" \
 add_link /etc/systemd/system/ps5-amdgpu-reprobe.service \
   etc/systemd/system/multi-user.target.wants/ps5-amdgpu-reprobe.service
 
+log "TTY session switching"
+# The base image has the tty-session marker and starts Gaming Mode on tty1.
+# Replace only the known helper, then add a narrow listener for Steam's exact
+# SwitchToUser desktop request. Gaming Mode remains the default session.
+[[ -f $R/etc/ps5-use-tty-sessions ]] || die "/etc/ps5-use-tty-sessions is missing"
+[[ $(cat "$R/home/steam/.config/ps5-next-session") == gamescope ]] ||
+  die "the base image does not default to Gaming Mode"
+replace_file 0755 "$REPO/distros/cachyos/files/steamos-session-select" \
+  usr/bin/steamos-session-select "$OLD_SESSION_SELECT_SHA256"
+add_file 0755 "$PROFILE/files/ps5-session-switch-listener" \
+  usr/local/sbin/ps5-session-switch-listener
+add_file 0644 "$PROFILE/files/ps5-session-switch-listener.service" \
+  etc/systemd/system/ps5-session-switch-listener.service
+add_link /etc/systemd/system/ps5-session-switch-listener.service \
+  etc/systemd/system/multi-user.target.wants/ps5-session-switch-listener.service
+
+log "Disable unsupported Linux sleep targets"
+for target in sleep suspend hibernate hybrid-sleep suspend-then-hibernate; do
+  add_link /dev/null "etc/systemd/system/$target.target"
+done
+
 log "Boot report"
 add_file 0755 "$PROFILE/files/ps5-boot-report" usr/local/sbin/ps5-boot-report
 add_file 0644 "$PROFILE/files/ps5-boot-report.service" etc/systemd/system/ps5-boot-report.service
@@ -523,6 +564,16 @@ add_file 0644 "$PROFILE/files/ps5-boot-report.timer" etc/systemd/system/ps5-boot
 add_dir etc/systemd/system/timers.target.wants
 add_link /etc/systemd/system/ps5-boot-report.timer \
   etc/systemd/system/timers.target.wants/ps5-boot-report.timer
+
+in_root systemd-analyze verify \
+  /etc/systemd/system/ps5fan.service \
+  /etc/systemd/system/ps5-amdgpu-reprobe.service \
+  /etc/systemd/system/ps5-performance.service \
+  /etc/systemd/system/ps5-session-switch-listener.service \
+  /etc/systemd/system/ps5-iw620-firmware.service \
+  /etc/systemd/system/ps5-bt-quiet.service \
+  /etc/systemd/system/ps5-boot-report.service \
+  /etc/systemd/system/ps5-boot-report.timer
 
 log "Ethernet"
 add_file 0644 "$PROFILE/files/ps5-ethernet.conf" etc/modules-load.d/ps5-ethernet.conf
@@ -581,8 +632,8 @@ altered=$(sed -nE 's#^(warning|error): linux-ps5: /([^ ]+) .*#\2#p' <<<"$qkk" | 
 unexpected=$(grep -vE "^usr/lib/modules/$KVER/modules\.[a-z.]+$" <<<"$altered" || true)
 [[ -z $unexpected ]] || die "linux-ps5 files changed after installation: ${unexpected//$'\n'/ }"
 echo "ok  pacman -Qkk linux-ps5: $(grep -c . <<<"$altered" || true) module index files rewritten by depmod"
-package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-2/files" > "$work/package-new.paths"
-echo "linux-ps5 7.3.0-2 owns $(wc -l < "$work/package-new.paths") paths"
+package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-3/files" > "$work/package-new.paths"
+echo "linux-ps5 7.3.0-3 owns $(wc -l < "$work/package-new.paths") paths"
 
 expect_sha "$R/etc/mkinitcpio.conf" "$MKINITCPIO_CONF_SHA256" "/etc/mkinitcpio.conf (unchanged)"
 umount_all
@@ -644,17 +695,21 @@ awk -F'\t' -v OFS='\t' '
 # Split them: paths either kernel package owns (and their pacman database
 # entries) are the kernel swap, checked by pacman above; everything else must
 # match root-changes.expected exactly.
+old_package_db=${OLD_PACKAGE// /-}
+new_package_db=${NEW_PACKAGE// /-}
 {
   cat "$work/package-old.paths" "$work/package-new.paths"
-  echo var/lib/pacman/local/linux-ps5-7.1.7-1
-  echo var/lib/pacman/local/linux-ps5-7.3.0-2
+  echo "var/lib/pacman/local/$old_package_db"
+  echo "var/lib/pacman/local/$new_package_db"
 } | sort -u > "$work/package.paths"
-awk -v swap="$work/kernel-swap" -v rest="$work/profile-changes" '
+awk -v swap="$work/kernel-swap" -v rest="$work/profile-changes" \
+    -v old_db="$old_package_db" -v new_db="$new_package_db" '
   NR == FNR { owned[$0] = 1; next }
   {
     p = $2
     if (p in owned ||
-        p ~ /^var\/lib\/pacman\/local\/linux-ps5-(7\.1\.7-1|7\.3\.0-2)\//)
+        index(p, "var/lib/pacman/local/" old_db "/") == 1 ||
+        index(p, "var/lib/pacman/local/" new_db "/") == 1)
       print > swap
     else
       print > rest

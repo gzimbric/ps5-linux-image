@@ -133,6 +133,40 @@ scrub() {
         | tail -n 40 || true
 
     echo
+    echo "[bluetooth]"
+    lsusb -d 1286:2059 2>&1 || true
+    lsusb -t 2>&1 || true
+    btusb=$(modinfo -n btusb 2>/dev/null || true)
+    printf 'btusb=%s\n' "${btusb:-unavailable}"
+    if [ -n "$btusb" ] && [ -f "$btusb" ]; then
+        sha256sum "$btusb" 2>&1 || true
+    fi
+    printf 'btusb vermagic='; modinfo -F vermagic btusb 2>&1 || true
+    printf 'btusb srcversion='; modinfo -F srcversion btusb 2>&1 || true
+    lsmod 2>&1 | grep -E '^(btusb|btintel|btbcm|btrtl|btmtk|bluetooth|hid_playstation)' || true
+    bluetoothctl list 2>&1 || true
+    bluetoothctl show 2>&1 || true
+    if command -v btmgmt >/dev/null 2>&1; then
+        btmgmt info 2>&1 || true
+    fi
+    rfkill list bluetooth 2>&1 || true
+    for controller in /sys/class/bluetooth/hci*; do
+        [ -e "$controller" ] || continue
+        printf '%s address=%s path=%s\n' "${controller##*/}" \
+            "$(cat "$controller/address" 2>/dev/null || echo unavailable)" \
+            "$(readlink -f "$controller/device" 2>/dev/null || echo unavailable)"
+    done
+    for device in /sys/bus/usb/devices/*; do
+        [ "$(cat "$device/idVendor" 2>/dev/null)" = 1286 ] || continue
+        [ "$(cat "$device/idProduct" 2>/dev/null)" = 2059 ] || continue
+        printf '%s power/control=%s\n' "${device##*/}" \
+            "$(cat "$device/power/control" 2>/dev/null || echo unavailable)"
+    done
+    dmesg --color=never 2>&1 | \
+        grep -Ei 'Bluetooth|btusb|hci[0-9]|1286|2059|opcode|xhci|usb.*disconnect|error -[0-9]+' | \
+        tail -n 160 || true
+
+    echo
     echo "[pci]"
     lspci -nnk 2>&1 || true
 
@@ -158,11 +192,16 @@ scrub() {
     echo "[temperatures]"
     sensors 2>&1 || true
 
-    # The frequency drivers are installed but not loaded at boot. These lines
-    # show whether they were loaded by hand and what the clocks and
-    # temperatures read at the time of the report.
+    # Build 3 loads the frequency drivers after the fixed fan request unless
+    # the FAT opt-out is present. Record both the decision and the resulting
+    # clocks and temperatures.
     echo
     echo "[thermals-and-clocks]"
+    if [ -e /boot/efi/disable-ps5-performance ]; then
+        echo "performance opt-out: present"
+    else
+        echo "performance opt-out: absent"
+    fi
     for module in k10temp ps5_cpufreq ps5_gpufreq; do
         if [ -d "/sys/module/$module" ]; then
             printf 'module %s loaded\n' "$module"
@@ -214,6 +253,16 @@ scrub() {
     done
 
     echo
+    echo "[session-and-sleep]"
+    printf 'next tty1 session='; cat /home/steam/.config/ps5-next-session 2>&1 || true
+    printf 'foreground vt='; fgconsole 2>&1 || true
+    loginctl list-sessions --no-legend 2>&1 || true
+    for target in sleep suspend hibernate hybrid-sleep suspend-then-hibernate; do
+        printf '%s.target=' "$target"
+        systemctl is-enabled "$target.target" 2>&1 || true
+    done
+
+    echo
     echo "[kernel-7.3]"
     dmesg --color=never 2>&1 | grep -E 'Strawberry was here|MP1ERROR|cpu frequency|gpufreq|cpufreq|vcn|VCN|Salina|amdgpu.*(ring|ip block)' \
         | tail -n 80 || true
@@ -222,9 +271,10 @@ scrub() {
     echo "[services]"
     # --lines=0: the unit log lines are in the journal tail, scrubbed.
     systemctl --no-pager --full --lines=0 status \
-        NetworkManager.service sshd.service getty@tty1.service \
+        NetworkManager.service bluetooth.service sshd.service getty@tty1.service \
         first-boot.service ps5fan.service ps5-amdgpu-reprobe.service \
-        ps5-iw620-firmware.service ps5-bt-quiet.service \
+        ps5-iw620-firmware.service ps5-bt-quiet.service ps5-performance.service \
+        ps5-session-switch-listener.service \
         ps5-boot-report.timer 2>&1 || true
     systemctl --no-pager --full --failed 2>&1 || true
     systemctl --no-pager --full list-jobs 2>&1 || true

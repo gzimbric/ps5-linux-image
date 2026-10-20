@@ -2,8 +2,8 @@
 # Builds the NXP IW620 Wi-Fi modules (mlan.ko, moal.ko) for the Linux 7.3.0
 # kernel that docker/kernel-builder/build-k73.sh just built.
 #
-# The same driver as the 7.1.7 Ubuntu Wi-Fi build: nxp-imx/mwifiex a5fe4e1
-# with the four ps5-linux-mwifiex 4aff908 patches, plus
+# The same driver base as the 7.1.7 Ubuntu Wi-Fi build: nxp-imx/mwifiex
+# a5fe4e1, with seven patches from ps5-linux-mwifiex 4bce848, plus
 # ps5-iw620-kernel73-compat.patch from this repository for the 7.3 cfg80211
 # and string changes. It runs in the ps5-kernel-builder image with no
 # network, the built kernel tree at /src (so the module CRCs come from this
@@ -13,10 +13,10 @@
 set -euo pipefail
 
 KVER=7.3.0
-PS5_MWIFIEX_COMMIT=4aff9085530a3cdf7d5fbb124c006cc299ac3605
+PS5_MWIFIEX_COMMIT=4bce848dd098bf74fbafd0078463da3d9f0d7f80
 NXP_MWIFIEX_COMMIT=a5fe4e194bf99315e349d81d77d6dfacec70757a
 COMPAT=/repo/distros/cachyos1160-k73/kernel/ps5-iw620-kernel73-compat.patch
-COMPAT_SHA256=899b4b1cd83bf6b85074d3aff311bbc104723e118a327aa65f7326546c789304
+COMPAT_SHA256=9d47f54932097ce585aa7729de464e17d2ab8868b2b33da6d0962a173368f751
 ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -66,9 +66,12 @@ while read -r patch expected; do
   echo "applied $patch"
 done <<'EOF'
 ps5-iw620.patch ce5e7f72c15785b18948761474735ec26d80458d9e6dc39b207bf0ad31688f3a
-ps5-iw620-cmd-timeout-recover.patch 3cf0a8fe9a15a139c37367c20f3cd5567e44e55d948fc7cb54f62c0c2bec7053
+ps5-iw620-cmd-timeout-recover.patch ca6cd9cd1a6f0e2549c20aa8ba5180ab3389379e48a817e7b525e838f73743fa
 ps5-iw620-kernel71-compat.patch 7c091f69db2725b2fa52d01bb21126fe21c8bf97c9ec9ce87ca3340d29c5017c
 ps5-iw620-rtnl-bounded-wait.patch 9b63bdd86301ca65768836dc6f7baa94797e5981d6d572c44f53e0512cc1fe1a
+ps5-iw620-he.patch 3cb5e8c8b95b07281f3e51cc84bd79c51b3ca68229b13c7094e46af97f72f5e4
+ps5-iw620-tx-min128.patch 0533fb04ed9bfd6c59e47f15bf723995e6c22bddc06bdc6a64dcd3d61de8eac9
+ps5-iw620-tx-priority.patch 20ddf7e66d2d7ffa303a990516a2a3adc552d34f6dba64a3a9b92cb50dd6932c
 EOF
 expect_sha256 "$COMPAT" "$COMPAT_SHA256"
 git apply "$COMPAT"

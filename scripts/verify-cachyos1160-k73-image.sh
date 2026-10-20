@@ -5,8 +5,8 @@
 # that rewrites the image (CI zeroes the free blocks of the root filesystem
 # first). It checks what has to be true on the console: the FAT boot files
 # and the bounded loader's limits, the kernel and its modules, the Wi-Fi
-# driver and the absence of its firmware, the frequency drivers being
-# present but not loaded at boot, the enabled services, the kernel hold and
+# driver and the absence of its firmware, the guarded frequency-driver
+# startup, the enabled services, the kernel hold and
 # the boot-file hook, and the account and SSH hygiene.
 #
 # Usage: sudo scripts/verify-cachyos1160-k73-image.sh --image IMG [--kernel-dir DIR]
@@ -18,7 +18,7 @@ shopt -s inherit_errexit
 export LC_ALL=C
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-2"
+NEW_PACKAGE="linux-ps5 7.3.0-3"
 IMAGE_SIZE=12582912000
 P1_START=1024000 P1_SECTORS=23549952
 P2_START=2048 P2_SECTORS=1021952
@@ -50,6 +50,8 @@ done
 ((EUID == 0)) || die "run as root"
 image=$(realpath -e -- "$image")
 kernel_dir=$(realpath -e -- "$kernel_dir")
+PYTHONDONTWRITEBYTECODE=1 \
+  python3 "$PROFILE/files/ps5-session-switch-listener" --self-test
 
 [[ $(stat -c %s -- "$image") == "$IMAGE_SIZE" ]] || die "image is not $IMAGE_SIZE bytes"
 layout=$(partx -g -o NR,START,SECTORS -- "$image" | awk '{ print $1, $2, $3 }')
@@ -121,8 +123,8 @@ ok "bzImage: $version"
 # ------------------------------------------------------------------ kernel
 
 db=$(cd -- "$R/var/lib/pacman/local" && find . -mindepth 1 -maxdepth 1 -name 'linux-ps5-*' -printf '%P\n')
-[[ $db == linux-ps5-7.3.0-2 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
-[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-2 ]] ||
+[[ $db == linux-ps5-7.3.0-3 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
+[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-3 ]] ||
   die "pacman database does not say $NEW_PACKAGE"
 modules=$(cd -- "$R/usr/lib/modules" && find . -mindepth 1 -maxdepth 1 -printf '%P\n')
 [[ $modules == "$KVER" ]] || die "kernel module trees: ${modules//$'\n'/ }"
@@ -143,6 +145,8 @@ for module in mlan moal; do
 done
 grep -qxF "alias $IW620_ALIAS moal" "$m/modules.alias" || die "modules.alias has no IW620 entry"
 same "$R/etc/modprobe.d/ps5-iw620.conf" "$PROFILE/files/ps5-iw620.conf" "/etc/modprobe.d/ps5-iw620.conf"
+same "$R/etc/NetworkManager/conf.d/20-ps5-iw620.conf" \
+  "$PROFILE/files/20-ps5-iw620.conf" "/etc/NetworkManager/conf.d/20-ps5-iw620.conf"
 blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(moal|mlan)([[:space:]]|$)' \
   "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d" || true)
 [[ $blocks == "$R/etc/modprobe.d/ps5-iw620.conf:blacklist moal" ]] ||
@@ -150,7 +154,9 @@ blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(moal|mlan)([[:s
 firmware=$(find "$R" "$B" -xdev -name 'pcieuartiw620*' -print)
 [[ -z $firmware ]] || die "IW620 firmware in the image: $firmware"
 same "$R/usr/local/sbin/ps5-iw620-firmware" "$PROFILE/files/ps5-iw620-firmware" "ps5-iw620-firmware"
-ok "IW620 driver installed, udev alias load blocked, no IW620 firmware anywhere"
+grep -qx 'wifi.powersave=2' "$R/etc/NetworkManager/conf.d/20-ps5-iw620.conf" ||
+  die "NetworkManager Wi-Fi power saving is not disabled"
+ok "IW620 driver installed, udev alias load blocked, no firmware, NetworkManager power saving disabled"
 
 # ------------------------------------------------------- frequency drivers
 
@@ -162,7 +168,16 @@ for module in ps5-cpufreq ps5-gpufreq; do
     die "$module would be loaded at boot"
   fi
 done
-ok "ps5-cpufreq and ps5-gpufreq installed, no alias, not in modules-load.d"
+same "$R/usr/local/sbin/ps5-performance" "$PROFILE/files/ps5-performance" "/usr/local/sbin/ps5-performance"
+same "$R/etc/systemd/system/ps5-performance.service" \
+  "$PROFILE/files/ps5-performance.service" "/etc/systemd/system/ps5-performance.service"
+grep -qF '/boot/efi/disable-ps5-performance' "$R/usr/local/sbin/ps5-performance" ||
+  die "ps5-performance has no FAT opt-out"
+grep -qF 'modprobe ps5_gpufreq' "$R/usr/local/sbin/ps5-performance" ||
+  die "ps5-performance does not load the GPU driver first"
+grep -qF 'modprobe ps5_cpufreq' "$R/usr/local/sbin/ps5-performance" ||
+  die "ps5-performance does not load the CPU driver"
+ok "ps5-cpufreq and ps5-gpufreq installed, absent from early-load paths, guarded startup installed"
 
 # --------------------------------------------------------------- initramfs
 
@@ -188,6 +203,8 @@ ok "initramfs: amdgpu for $KVER, 8 GPU firmware files, ps5-amdgpu.conf, no Wi-Fi
 w=$R/etc/systemd/system
 for link in multi-user.target.wants/ps5fan.service \
   multi-user.target.wants/ps5-amdgpu-reprobe.service \
+  multi-user.target.wants/ps5-performance.service \
+  multi-user.target.wants/ps5-session-switch-listener.service \
   multi-user.target.wants/ps5-iw620-firmware.service \
   multi-user.target.wants/ps5-bt-quiet.service \
   multi-user.target.wants/sshd.service \
@@ -196,14 +213,48 @@ for link in multi-user.target.wants/ps5fan.service \
   [[ -L $w/$link && -e $R$(readlink "$w/$link" | sed 's#^\.\./#/etc/systemd/system/#') ]] ||
     die "$link is not enabled"
 done
+for target in sleep suspend hibernate hybrid-sleep suspend-then-hibernate; do
+  [[ -L $w/$target.target && $(readlink "$w/$target.target") == /dev/null ]] ||
+    die "$target.target is not masked"
+done
 [[ -z $(find "$w" "$R/usr/lib/systemd/system" -name 'ps5-stage-firmware*' -print) ]] ||
   die "the 7.1.7 package's ps5-stage-firmware is still installed"
 for f in ps5-boot-report ps5-amdgpu-reprobe ps5-1160-check-boot-files ps5-update-boot-files; do
   same "$R/usr/local/sbin/$f" "$PROFILE/files/$f" "/usr/local/sbin/$f"
 done
+for f in ps5fan ps5-amdgpu-reprobe ps5-performance \
+  ps5-session-switch-listener ps5-iw620-firmware ps5-bt-quiet \
+  ps5-boot-report; do
+  same "$R/etc/systemd/system/$f.service" "$PROFILE/files/$f.service" \
+    "/etc/systemd/system/$f.service"
+done
+same "$R/etc/systemd/system/ps5-boot-report.timer" \
+  "$PROFILE/files/ps5-boot-report.timer" "/etc/systemd/system/ps5-boot-report.timer"
+same "$R/usr/local/sbin/ps5-session-switch-listener" \
+  "$PROFILE/files/ps5-session-switch-listener" "/usr/local/sbin/ps5-session-switch-listener"
+same "$R/etc/systemd/system/ps5-session-switch-listener.service" \
+  "$PROFILE/files/ps5-session-switch-listener.service" "/etc/systemd/system/ps5-session-switch-listener.service"
+same "$R/usr/bin/steamos-session-select" "$REPO/distros/cachyos/files/steamos-session-select" \
+  "/usr/bin/steamos-session-select"
+[[ -f $R/etc/ps5-use-tty-sessions ]] || die "tty-session marker missing"
+[[ $(cat "$R/home/steam/.config/ps5-next-session") == gamescope ]] ||
+  die "the image does not default to Gaming Mode"
 [[ -x $R/usr/local/sbin/ps5_fan_max && -x $R/usr/local/sbin/grow-rootfs ]] ||
   die "ps5_fan_max or grow-rootfs is missing"
-ok "fan, display re-detect, Wi-Fi firmware, Bluetooth, SSH, boot report and grow-rootfs enabled"
+unshare --net chroot "$R" /usr/bin/env -i \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/bin LC_ALL=C PYTHONDONTWRITEBYTECODE=1 \
+  /usr/local/sbin/ps5-session-switch-listener --self-test
+unshare --net chroot "$R" /usr/bin/env -i PATH=/usr/bin LC_ALL=C \
+  systemd-analyze verify \
+    /etc/systemd/system/ps5fan.service \
+    /etc/systemd/system/ps5-amdgpu-reprobe.service \
+    /etc/systemd/system/ps5-performance.service \
+    /etc/systemd/system/ps5-session-switch-listener.service \
+    /etc/systemd/system/ps5-iw620-firmware.service \
+    /etc/systemd/system/ps5-bt-quiet.service \
+    /etc/systemd/system/ps5-boot-report.service \
+    /etc/systemd/system/ps5-boot-report.timer
+ok "fan, display re-detect, clocks, session switch, Wi-Fi, Bluetooth, SSH and boot report enabled; Linux sleep masked"
 
 # ------------------------------------------------------- kernel hold, hook
 

@@ -13,9 +13,10 @@
 #   /out                 output directory
 #
 # The patch set is the 7.3 port by rmux (Armandas Kvietkus) in
-# rmuxnet/ps5-linux-patches-1. A small, hash-pinned follow-up makes the IW620
-# Bluetooth quirks in that port take effect. The only config change made here
-# is building the two PS5 frequency drivers as modules.
+# rmuxnet/ps5-linux-patches-1. A byte-for-byte, hash-pinned follow-up from the
+# ps5-bazzite-deck v1.0.3 release makes the IW620 Bluetooth quirks in that port
+# take effect. The only config change made here is building the two PS5
+# frequency drivers as modules.
 set -euo pipefail
 
 LINUX_COMMIT=c03c1a14507dfaf8b856c2608f9ac216021fc222   # tag v7.3
@@ -23,7 +24,7 @@ PATCHES_COMMIT=36f173f39e5e76c00c4e366a7b909f33bc665ad5
 KVER=7.3.0
 PATCH_SHA256=b8a238b9973febbcf851053d99195bd7320bb0827c8ee5e4c54eba6b6f7cde3f
 BTUSB_PATCH=/repo/distros/cachyos1160-k73/kernel/ps5-btusb-iw620-quirks.patch
-BTUSB_PATCH_SHA256=54d7addbb4cd95c943f9a4485229ac5516ad08ebe0f4aa02fd72cf33298fa0a2
+BTUSB_PATCH_SHA256=c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8
 CONFIG_SHA256=2294e750518bbfedf9741f5638d81f6308a2fa3839b2e005f5e071224622533d
 VCN_SHA256=bbd15ab65e76178c2918e8224b6ab4ab1711f1b59d935ee131ab188a9712e596
 VCN_SIZE=404544
@@ -34,7 +35,7 @@ CHECK=/repo/distros/cachyos1160-k73/files/ps5-1160-check-boot-files
 export KBUILD_BUILD_USER=ps5
 export KBUILD_BUILD_HOST=ps5-linux-image
 export KBUILD_BUILD_TIMESTAMP='Sun Oct 18 16:00:53 UTC 2026'
-export KBUILD_BUILD_VERSION=2
+export KBUILD_BUILD_VERSION=3
 export TZ=UTC
 export LC_ALL=C
 export CCACHE_DISABLE=1
@@ -80,19 +81,33 @@ git apply --check "$BTUSB_PATCH"
 git apply "$BTUSB_PATCH"
 echo "applied ${BTUSB_PATCH##*/} ($(grep -c '^diff --git' "$BTUSB_PATCH") files)"
 btusb=drivers/bluetooth/btusb.c
-test "$(grep -c 'USB_DEVICE(0x1286, 0x2059)' "$btusb")" = 2 ||
-  die "$btusb does not have the IW620 in both ID tables"
+btusb_table_iw620=$(awk '
+  /static const struct usb_device_id btusb_table\[\] = \{/ { in_table = 1 }
+  in_table && /USB_DEVICE\(0x1286, 0x2059\)/ { count++ }
+  in_table && /^};$/ { print count + 0; exit }
+' "$btusb")
+quirks_table_iw620=$(awk '
+  /static const struct usb_device_id quirks_table\[\] = \{/ { in_table = 1 }
+  in_table && /USB_DEVICE\(0x1286, 0x2059\)/ { count++ }
+  in_table && /^};$/ { print count + 0; exit }
+' "$btusb")
+test "$btusb_table_iw620" = 0 ||
+  die "$btusb still has the IW620 in btusb_table"
+test "$quirks_table_iw620" = 1 ||
+  die "$btusb does not have exactly one IW620 entry in quirks_table"
+test "$(grep -c 'match = usb_match_id(intf, quirks_table);' "$btusb")" = 1 ||
+  die "$btusb does not have exactly one quirks-table lookup"
+test "$(grep -c 'if ((id->driver_info & BTUSB_IFNUM_0)' "$btusb")" = 1 ||
+  die "$btusb does not have exactly one BTUSB_IFNUM_0 check"
 quirks_lookup_line=$(grep -n 'match = usb_match_id(intf, quirks_table);' "$btusb" | cut -d: -f1)
-ifnum2_line=$(grep -n 'if ((id->driver_info & BTUSB_IFNUM_2)' "$btusb" | cut -d: -f1)
 ifnum0_line=$(grep -n 'if ((id->driver_info & BTUSB_IFNUM_0)' "$btusb" | cut -d: -f1)
-test "$ifnum2_line" -gt "$quirks_lookup_line" && test "$ifnum0_line" -gt "$quirks_lookup_line" ||
-  die "btusb interface-number checks still run before the quirks lookup"
+test "$ifnum0_line" -gt "$quirks_lookup_line" ||
+  die "btusb BTUSB_IFNUM_0 check still runs before the quirks lookup"
 
 step "Config"
 cp /ps5-linux-patches/.config .config
 # Build the CPU and GPU frequency drivers as modules. Neither has a module
-# alias, so nothing loads them unless asked; the first 7.3 boot then changes
-# only the kernel, and each driver can be tried on its own.
+# alias, so only the image's guarded startup service can load them explicitly.
 scripts/config --file .config --module X86_PS5_CPUFREQ --module PS5_GPUFREQ
 make -s olddefconfig
 config_is CONFIG_X86_PS5_CPUFREQ m
@@ -178,9 +193,10 @@ cp System.map Module.symvers /out/kernel/
   echo "Kernel:       v7.3, commit $LINUX_COMMIT"
   echo "Patch set:    rmuxnet/ps5-linux-patches-1, commit $PATCHES_COMMIT"
   echo "              linux.patch sha256 $PATCH_SHA256"
-  echo "Follow-up:    ps5-btusb-iw620-quirks.patch sha256 $BTUSB_PATCH_SHA256"
   echo "              .config sha256 $CONFIG_SHA256"
   echo "              firmware/amdgpu/ps5_vcn.bin $VCN_SIZE bytes, sha256 $VCN_SHA256 (built in)"
+  echo "Bluetooth:    ps5-bazzite-deck v1.0.3 release asset ps5-btusb-quirks-fix.patch"
+  echo "              vendored as ps5-btusb-iw620-quirks.patch sha256 $BTUSB_PATCH_SHA256"
   echo "Config:       X86_PS5_CPUFREQ=m PS5_GPUFREQ=m, then olddefconfig; sha256 $(sha256sum .config | awk '{print $1}')"
   echo "Compiler:     $(x86_64-linux-gnu-gcc --version | head -1), $(uname -m) build host"
   echo "Version:      $(strings arch/x86/boot/bzImage | awk -v k="$KVER (" 'index($0, k) == 1 && !n { print; n = 1 }')"

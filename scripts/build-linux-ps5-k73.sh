@@ -10,8 +10,8 @@
 #
 # The kernel patch set is the 7.3 port with the PS5 CPU and GPU frequency
 # drivers by rmux (Armandas Kvietkus), rmuxnet/ps5-linux-patches-1, fetched at
-# the pinned commit. The builder then applies the repository's hash-pinned
-# IW620 Bluetooth quirk follow-up.
+# the pinned commit. The builder then applies the exact, hash-pinned IW620
+# Bluetooth source patch published with ps5-bazzite-deck v1.0.3.
 #
 # Needs git and Docker. Runs on Linux or macOS; GitHub Actions uses an x86_64
 # runner and the linux/amd64 builder.
@@ -25,7 +25,7 @@ LINUX_COMMIT=c03c1a14507dfaf8b856c2608f9ac216021fc222
 PATCHES_REPO=https://github.com/rmuxnet/ps5-linux-patches-1.git
 PATCHES_COMMIT=36f173f39e5e76c00c4e366a7b909f33bc665ad5
 PS5_MWIFIEX_REPO=https://github.com/ps5-linux/ps5-linux-mwifiex.git
-PS5_MWIFIEX_COMMIT=4aff9085530a3cdf7d5fbb124c006cc299ac3605
+PS5_MWIFIEX_COMMIT=4bce848dd098bf74fbafd0078463da3d9f0d7f80
 NXP_MWIFIEX_REPO=https://github.com/nxp-imx/mwifiex.git
 NXP_MWIFIEX_COMMIT=a5fe4e194bf99315e349d81d77d6dfacec70757a
 

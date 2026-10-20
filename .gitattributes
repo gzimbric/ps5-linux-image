@@ -13,3 +13,6 @@ distros/shared/zz-update-boot* text eol=lf
 docker/** text eol=lf
 distros/cachyos1160/** text eol=lf
 distros/cachyos1160-k73/** text eol=lf
+
+# Byte-for-byte release asset; its unified-diff context contains upstream whitespace.
+distros/cachyos1160-k73/kernel/ps5-btusb-iw620-quirks.patch whitespace=-blank-at-eol,-space-before-tab

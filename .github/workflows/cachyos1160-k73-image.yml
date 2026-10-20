@@ -68,7 +68,7 @@ defaults:
 
 env:
   KERNEL_DIR: linux-bin/cachyos1160-k73
-  PACKAGE: linux-ps5-7.3.0-2-x86_64.pkg.tar.zst
+  PACKAGE: linux-ps5-7.3.0-3-x86_64.pkg.tar.zst
 
 jobs:
   kernel:
@@ -512,18 +512,19 @@ jobs:
           cd "$DIST"
 
           cat > release-notes.md <<EOF
-          **Public tester prerelease for retail PS5 firmware 11.60 only. This exact CI-built image has not been booted on hardware.** A local prerelease image from this profile booted in Run 21; it was not image 1 or image 2. Follow the [image-2 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md), use the recommended bounded Wi-Fi ELF from the [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21), and fully power off instead of using Rest Mode between attempts.
+          **Public Image 3 tester prerelease for retail PS5 firmware 11.60 only. This exact CI-built image has not been booted on hardware.** A local prerelease image from this profile booted in Run 21, but it was not this artifact. Follow the [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md), use the recommended bounded Wi-Fi ELF from the [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21), and fully power off instead of using Linux sleep or Rest Mode between attempts.
 
-          This build was produced from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). The fixed image-2 download and checksum record is the [image-2 tester prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2). Publishing it for testing is not evidence of a console boot.
+          This build was produced from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). Publishing it for testing proves only that the hosted build and structural checks passed; it is not evidence of a console boot.
 
           ### What's new
 
-          - Linux 7.3.0 replaces 7.1.7. The kernel is mainline v7.3 with rmux's 7.3 port of the PS5 patches ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`), plus a hash-pinned local follow-up that restores the IW620 quirks-table entry and post-lookup interface checks present in merged [ps5-linux patch-set PR #35](https://github.com/ps5-linux/ps5-linux-patches/pull/35) but absent from the pinned rmux 7.3 patch, while retaining rmux's 7.3 IW620 quirk flags. [VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3) independently reports a paired DualSense on a CFI-10xx PS5 running firmware 13.60 after the same core \`btusb\` correction. Its patch is not byte-identical to this one; that result supports the diagnosis but is not an 11.60 hardware test of image 2. The kernel is built with GCC 14.2. amdgpu still runs with \`dpm=0 gpu_recovery=0 force_1080p=1\`. The Bluetooth fix still needs a hardware test.
-          - \`ps5fan.service\` is enabled at boot and requests the tested maximum fan servo pattern (\`3\`) as a fixed bring-up setting. It is not a dynamic or calibrated fan curve. This is separate from the CPU and GPU frequency drivers, which remain unloaded at boot and manual-only.
-          - The PS5 CPU and GPU frequency drivers are included but not loaded at boot. Both loaded manually in Run 21, and the GPU driver lowered the observed idle temperature from about 50 C to about 36 C. A brief game load peaked at 84 C and ended before thermal equilibrium, so the drivers remain manual and experimental. Keep amdgpu's \`dpm=0\` (the image default). Only after the baseline test, follow the [tester guide's opt-in procedure](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md): try one driver per boot, monitor temperatures and clocks, and fully power off afterward instead of using Rest Mode.
+          - The \`linux-ps5 7.3.0-3\` package uses mainline Linux 7.3 with rmux's published 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`). After it, the build applies the exact \`ps5-btusb-quirks-fix.patch\` asset from [VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), pinned at SHA-256 \`c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8\`. It is rebuilt into this kernel; do not copy a prebuilt \`btusb.ko\` from Bazzite or another image. Bazzite reports successful DualSense pairing on Linux 7.3 and firmware 13.60. That supports the source choice but is not an 11.60 result for this image.
+          - \`ps5fan.service\` requests fixed maximum fan servo pattern \`3\` before the performance policy starts. The tested console's unknown fan revision does not use a working dynamic table, so this remains a conservative bring-up request, not a calibrated curve or proof of physical RPM.
+          - \`ps5-performance.service\` now starts by default after the fan request. It verifies amdgpu still has \`dpm=0\`, loads \`ps5_gpufreq\` before \`ps5_cpufreq\`, selects GPU \`simple_ondemand\` and CPU \`schedutil\`, and keeps CPU boost off. Both drivers worked when loaded manually in Run 21, but automatic startup remains experimental until the bounded thermal test passes. To skip it on the next cold boot, create an empty \`/boot/efi/disable-ps5-performance\` file and fully power off. Do not use \`rmmod\` as a rollback because unloading does not restore the clocks.
+          - Gaming Mode remains the default. A narrow system-bus listener now handles only Steam's expected desktop switch request, selects Plasma, and terminates only the \`steam\` session on \`tty1\`. This automates the manual handoff that restored the display in Run 21. Linux sleep, suspend, hibernate, hybrid sleep and suspend-then-hibernate are masked; use a full shutdown between Linux boots.
           - The kernel enables amdgpu's VCN video block. The local Run 21 image brought up the display with VCN enabled, but this CI image remains unbooted; see "If there is no picture" below. Its firmware, \`ps5_vcn.bin\` from AMD, is built into the kernel; the licence is in \`/usr/share/licenses/linux-ps5/LICENSE.amdgpu\`.
-          - The onboard IW620 Wi-Fi driver is installed, but the image has no Wi-Fi firmware. The Wi-Fi build of the loader writes this console's own firmware to \`lib/nxp/\` on the boot partition. At boot the image copies it to \`/lib/firmware/nxp/\` and only then loads the driver by name; its PCI alias is blacklisted to prevent an earlier firmware-less probe. Once the Wi-Fi loader has run, the firmware stays installed and Wi-Fi keeps working with the other bounded build too. Until then, use Ethernet. The ELF does not contain the firmware: never upload or redistribute \`lib/nxp/pcieuartiw620_combo_v1.bin\` or \`/lib/firmware/nxp/pcieuartiw620_combo_v1.bin\`.
-          - The boot report (\`ps5-boot-report.txt\` on the boot partition) also records temperatures, CPU and GPU clocks, and whether the frequency drivers are loaded. It replaces Wi-Fi network names with \`<wifi-name>\` and masks MAC addresses, but it still has the console's IP addresses. Review and redact it and any \`dmesg\` output before posting; do not upload raw firmware, keys, the FAT partition, or unsanitized logs.
+          - The onboard IW620 Wi-Fi driver is updated to \`ps5-linux/ps5-linux-mwifiex\` commit \`4bce848\`, including its HE and transmit-path fixes, with the Linux 7.3 compatibility follow-up. NetworkManager disables Wi-Fi power saving. The image still contains no Wi-Fi firmware: the bounded Wi-Fi loader writes this console's own firmware to \`lib/nxp/\` on the boot partition, and the boot service copies it before loading the driver. Never upload or redistribute \`lib/nxp/pcieuartiw620_combo_v1.bin\` or \`/lib/firmware/nxp/pcieuartiw620_combo_v1.bin\`.
+          - The boot report (\`ps5-boot-report.txt\` on the boot partition) records Bluetooth controller and module identity, temperatures, CPU/GPU clocks, the performance opt-out, session state and sleep masks. It replaces Wi-Fi network names with \`<wifi-name>\` and masks MAC addresses, but still contains IP addresses. Review and redact it and any \`dmesg\` output before posting; do not upload raw firmware, keys, the FAT partition, or unsanitized logs.
           - pacman holds \`linux-ps5\` back from updates. After a kernel or initramfs change, which an ordinary \`pacman -Syu\` can also make, a pacman hook builds a new initramfs, checks it, and updates \`bzImage\` and \`initrd.img\` on the boot partition if they pass the loader's checks. The pair it replaces is kept there as \`bzImage.prev\` and \`initrd.img.prev\`. pacman refuses a kernel change while the boot partition is not mounted read-write.
 
           Thanks to rmux (Armandas Kvietkus) for the 7.3 port and the frequency drivers.
@@ -574,7 +575,7 @@ jobs:
           \`\`\`
           EOF
 
-          url=$(gh release create "$TAG" --draft --target "$GITHUB_SHA" \
+          url=$(gh release create "$TAG" --draft --prerelease --target "$GITHUB_SHA" \
             --title "CachyOS 7.3.0 for PS5 firmware 11.60 ($TAG)" \
             --notes-file release-notes.md \
             ps5-cachyos1160-k73.img.xz SHA256SUMS build-info.txt cachyos1160-k73-root-changes.txt)
@@ -609,7 +610,7 @@ jobs:
             echo '```'
             echo "gh run download $GITHUB_RUN_ID -R $GITHUB_REPOSITORY -n cachyos1160-k73-release-files -D release-files"
             echo "cd release-files && sha256sum -c --ignore-missing SHA256SUMS"
-            echo "gh release create $TAG -R $GITHUB_REPOSITORY --draft --target $GITHUB_SHA \\"
+            echo "gh release create $TAG -R $GITHUB_REPOSITORY --draft --prerelease --target $GITHUB_SHA \\"
             echo "  --title 'CachyOS 7.3.0 for PS5 firmware 11.60 ($TAG)' --notes-file release-notes.md \\"
             echo "  ps5-cachyos1160-k73.img.xz SHA256SUMS build-info.txt cachyos1160-k73-root-changes.txt"
             echo '```'

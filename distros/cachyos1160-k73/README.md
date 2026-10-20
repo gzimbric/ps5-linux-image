@@ -3,32 +3,33 @@
 This profile takes the same official `ps5-cachyos` image as
 [`cachyos1160`](../cachyos1160/README.md) and replaces its 7.1.7 kernel with
 Linux 7.3.0. On top of the cachyos1160 changes it adds the IW620 Wi-Fi driver
-built for the new kernel, keeps the PS5 CPU and GPU frequency drivers
-available without loading them, and lets pacman keep the boot files up to
-date.
+built for the new kernel, guarded CPU and GPU frequency-driver startup,
+automatic `tty1` session handoff, and safe pacman boot-file updates.
 
 A local pre-release image from this profile booted on hardware in Run 21.
 Display, Ethernet, loader-supplied IW620 Wi-Fi and the frequency drivers all
-worked in that run. Run 21 did not boot either tagged CI image. The current
-image-2 candidate supersedes image 1 but is still unbooted; its Bluetooth and
-Wi-Fi load-order fixes need a fresh hardware run.
+worked in that run. Run 21 did not boot either tagged CI image. Image 2 is
+the latest published artifact and remains unbooted. Image 3 is a new source
+candidate; its exact hosted-CI artifact needs a fresh hardware run before any
+of its startup integrations can be called proven.
 
-> **Tester warning:** [image 2 is a public prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2),
-> but the exact CI image has not booted on a console. It is only for retail PS5
-> firmware 11.60 and requires the
+> **Tester warning:** The latest published artifact is
+> [image 2](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2),
+> but the exact CI image has not booted on a console. This profile is only for
+> retail PS5 firmware 11.60 and requires the
 > [bounded 11.60 loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
-> Use the bounded Wi-Fi ELF for the first run and follow the
+> For image 2, use the bounded Wi-Fi ELF and follow the
 > [image-2 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md).
 > Flashing overwrites the entire target drive. Keep the default-password system
-> on a trusted LAN, change the password immediately, fully power off instead of
-> using Rest Mode, never redistribute the console-dumped
+> on a trusted LAN, change the password immediately, never redistribute the
+> console-dumped
 > `pcieuartiw620_combo_v1.bin`, and redact reports before posting them.
 
 The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
 (sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
 
-## Image 2 tester prerelease
+## Published image 2 reference
 
 | Item | Value |
 |------|-------|
@@ -50,8 +51,9 @@ and release validation; none of them is a console boot.
 
 Compared with the local image that booted in Run 21, image 2:
 
-- applies the hash-pinned IW620 Bluetooth quirk-ordering follow-up described
-  below and records the package revision as `7.3.0-2`;
+- applies the earlier hash-pinned IW620 Bluetooth quirk-ordering follow-up
+  (SHA-256 `54d7addbb4cd95c943f9a4485229ac5516ad08ebe0f4aa02fd72cf33298fa0a2`)
+  and records the package revision as `7.3.0-2`;
 - blacklists `moal`'s automatic PCI-alias load, copies the console-supplied
   firmware first, and then loads the driver explicitly; and
 - keeps the already-tested rmux kernel patch set, bounded-loader contract,
@@ -59,12 +61,69 @@ Compared with the local image that booted in Run 21, image 2:
 
 Neither image-2 fix has been tested on the console. Steam's **Switch to
 Desktop** action and joining Wi-Fi from the KDE network menu also remain
-unresolved; Run 21 used a manual session switch and `sudo nmcli`. Bluetooth
-must be retested with the internal controller, Wi-Fi must be tested from a
-cold boot, and the frequency drivers stay manual until a bounded thermal and
-stability run establishes a safe policy. VCN video decode, an independent
-storage read-back or integrity check, repeat boots, suspend, and broader
-hardware coverage are also outside the current evidence.
+unresolved in image 2; Run 21 used a manual session switch and `sudo nmcli`.
+
+If image 2 hangs after **Switch to Desktop**, connect over SSH or open another
+TTY with `Ctrl+Alt+F2`, then run:
+
+```bash
+sudo steamos-session-select plasma
+sudo systemctl restart getty@tty1.service
+```
+
+Try `Ctrl+Alt+F1` if HDMI does not switch back to the first TTY. This is the
+same handoff that worked manually in Run 21. Do not use Linux suspend or Rest
+Mode as a recovery step; fully power off before another loader run.
+
+## Image 3 source candidate
+
+Image 3 keeps Gaming Mode as the default but integrates the parts that were
+manual in Run 21:
+
+- **Wi-Fi:** pins `ps5-linux/ps5-linux-mwifiex` commit
+  `4bce848dd098bf74fbafd0078463da3d9f0d7f80`, including its current HE
+  capability and transmit-path fixes, while retaining this profile's Linux
+  7.3 compatibility patch. The driver keeps `auto_fw_reload=0`, and
+  NetworkManager sets `wifi.powersave=2`. The exact Image 3 modules still need
+  an 11.60 console test, and
+  `sudo nmcli --ask device wifi connect <wifi-name>` remains the fallback if
+  the KDE network menu does not join.
+- **Bluetooth:** replaces the image-2 follow-up with the exact
+  `ps5-btusb-quirks-fix.patch` asset from Bazzite Deck v1.0.3, pinned at
+  SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.
+  It is rebuilt into this kernel rather than copying Bazzite's prebuilt
+  `btusb.ko`. Their Linux 7.3 and firmware 13.60 result supports the source
+  choice, but the exact image still needs 11.60 DualSense pairing and
+  coexistence testing.
+- **Fan:** requests fixed maximum servo pattern `3` before the performance
+  policy starts. The tested CFI-1115B reports an unknown fan revision, so the
+  dynamic fan table does not update on that console. This is a conservative
+  bring-up request, not a calibrated curve, and physical RPM is unmeasured.
+- **Performance:** after the fan service succeeds,
+  `ps5-performance.service` verifies `amdgpu dpm=0`, loads `ps5_gpufreq`
+  before `ps5_cpufreq`, checks GPU `simple_ondemand` and CPU `schedutil`, and
+  keeps CPU boost off. Never unload either module because unloading does not
+  restore the clocks. To opt out, create an empty
+  `/boot/efi/disable-ps5-performance` file and fully power off before the next
+  boot.
+- **Desktop handoff:** a constrained system-bus listener accepts the expected
+  display-manager request, selects Plasma, and terminates only the `steam`
+  session on `tty1`. This automates the known-good manual transition without
+  changing the default from Gaming Mode.
+- **Sleep:** Linux sleep, suspend, hibernate, hybrid sleep and
+  suspend-then-hibernate targets are masked. GameOS Rest Mode and wake remain
+  only the carrier used to launch the loader. Once Linux is running, shut down
+  fully between test boots.
+
+Image 3 remains a prerelease until its exact hosted-CI archive completes at
+least three to five cold boots, DualSense pairing, a 60-minute concurrent
+Wi-Fi and Bluetooth run, and a bounded thermal load. KDE Wi-Fi joining,
+automatic session handoff, startup frequency policy, physical fan response,
+VCN video decode, storage integrity and broader hardware coverage remain test
+gaps until recorded otherwise. The
+[Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md)
+is intentionally a source-candidate plan until the hosted run supplies exact
+release hashes.
 
 ## Patch provenance and credit
 
@@ -81,27 +140,30 @@ checks each by SHA-256; the pinned `linux.patch` hash is
 It does not rewrite or replace rmux's patch set, and the authorship carried
 in the patch and drivers is unchanged.
 
-Image 2 then applies one separate kernel follow-up,
-[`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch), with
-SHA-256
-`54d7addbb4cd95c943f9a4485229ac5516ad08ebe0f4aa02fd72cf33298fa0a2`.
-It restores the IW620 `quirks_table` entry and post-lookup interface-check
-ordering present in merged [ps5-linux patch-set PR #35](https://github.com/ps5-linux/ps5-linux-patches/pull/35)
-but absent from the pinned rmux 7.3 patch, while retaining rmux's 7.3 IW620
-quirk flags. This is not part of rmux's pinned patch and has not yet been
-proven by a console boot.
+The Image 3 profile also applies one separate, byte-for-byte and hash-checked
+kernel follow-up,
+[`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch). It
+makes the IW620-specific `quirks_table` match take precedence over the generic
+Bluetooth class match and performs the IW620 interface restriction after that
+lookup. The file is the exact `ps5-btusb-quirks-fix.patch` release asset from
+[VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3),
+SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.
+It is not part of rmux's pinned patch, so the builder applies it afterward and
+compiles a matching `btusb.ko`; modules from another image must not be copied
+over it.
 
-[VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3)
-independently reports a paired DualSense on a CFI-10xx PS5 running firmware
-13.60 after the same core `btusb` correction. Its patch is not byte-identical
-to this one. That result supports the diagnosis, but it is not an 11.60
-hardware test of image 2, which remains unbooted.
+Bazzite reports a paired DualSense on a CFI-10xx PS5 running firmware 13.60
+with Linux 7.3 after this correction. That is useful source-level evidence,
+but it is not an 11.60 hardware result for Image 3. Image 2 remains the
+published, unbooted artifact and contains its earlier non-identical follow-up.
 
-The out-of-tree Wi-Fi modules are a separate driver build: it uses the four pinned
-ps5-linux/ps5-linux-mwifiex patches plus this profile's hash-pinned Linux 7.3
-compatibility patch (SHA-256
-`899b4b1cd83bf6b85074d3aff311bbc104723e118a327aa65f7326546c789304`).
-Those do not alter rmux's kernel patch set.
+The out-of-tree Wi-Fi modules are a separate driver build. Image 3 pins
+`ps5-linux/ps5-linux-mwifiex` at
+`4bce848dd098bf74fbafd0078463da3d9f0d7f80`, applies its relevant patch series
+and then this profile's hash-pinned Linux 7.3 compatibility patch. The Linux
+7.2-only compatibility patch is deliberately excluded because this profile's
+patch handles the changed 7.3 interfaces. None of these patches alters rmux's
+kernel patch set.
 
 ## Loader
 
@@ -153,7 +215,8 @@ workflow runs the same steps on GitHub-hosted runners, zeroes the free
 blocks of the root filesystem, runs the verifier again, compresses the image
 to one `.img.xz` and attaches it to a draft release. It never creates
 numbered parts. If the compressed file is 2 GiB or larger, the workflow fails
-before the release step.
+before the release step. Compilation, assembly, compression and uploading all
+stay on the hosted runners; a Mac is not used to build or relay the artifact.
 
 ### Kernel
 
@@ -164,7 +227,7 @@ fetches each source at a pinned commit:
 |--------|--------|
 | Linux, tag `v7.3` | `c03c1a14507dfaf8b856c2608f9ac216021fc222` |
 | rmuxnet/ps5-linux-patches-1 | `36f173f39e5e76c00c4e366a7b909f33bc665ad5` |
-| ps5-linux/ps5-linux-mwifiex | `4aff9085530a3cdf7d5fbb124c006cc299ac3605` |
+| ps5-linux/ps5-linux-mwifiex | `4bce848dd098bf74fbafd0078463da3d9f0d7f80` |
 | nxp-imx/mwifiex | `a5fe4e194bf99315e349d81d77d6dfacec70757a` |
 
 `--patches-repo URL` fetches the patch set from a mirror instead; it still
@@ -180,7 +243,7 @@ with a fixed build user, host and timestamp. The kernel step
   `firmware/amdgpu/ps5_vcn.bin` (404,544 bytes, `bbd15ab6…`) by SHA-256 and
   applies the patch to v7.3, then checks and applies the local
   [`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch)
-  (`54d7addb…`);
+  (`c01bdcc…`);
 - sets `X86_PS5_CPUFREQ=m` and `PS5_GPUFREQ=m` (the published config has them
   built in) and runs `make olddefconfig`. Every other difference from the
   published config is a toolchain line; the build log shows the diff;
@@ -194,16 +257,19 @@ with a fixed build user, host and timestamp. The kernel step
 The Wi-Fi step
 ([`docker/kernel-builder/build-iw620-k73.sh`](../../docker/kernel-builder/build-iw620-k73.sh))
 runs with no network in `/build/nxp`, against the kernel tree in `/src`, with
-objtool on. It applies the four ps5-linux/ps5-linux-mwifiex `4aff908`
-patches the 7.1.7 Ubuntu Wi-Fi build also used (each checked by SHA-256) and
-[`kernel/ps5-iw620-kernel73-compat.patch`](kernel/ps5-iw620-kernel73-compat.patch),
-which adapts the driver to three changes in Linux 7.3 (SHA-256
-`899b4b1cd83bf6b85074d3aff311bbc104723e118a327aa65f7326546c789304`);
-its header explains them. The build stops on any compiler, objtool or modpost
-warning, and checks `.return_sites`, the vermagic and the IW620 PCI alias.
+objtool on. It applies seven hash-checked patches from the pinned
+ps5-linux/ps5-linux-mwifiex commit: the original driver changes, bounded
+command recovery, Linux 7.1 compatibility, bounded RTNL waiting, corrected HE
+capabilities, a 128-byte transmit minimum and transmit-priority normalization.
+It deliberately skips that repository's Linux 7.2-only compatibility patch,
+then applies
+[`kernel/ps5-iw620-kernel73-compat.patch`](kernel/ps5-iw620-kernel73-compat.patch)
+for the Linux 7.3 interfaces. The build stops on any compiler, objtool or
+modpost warning, and checks `.return_sites`, the vermagic and the IW620 PCI
+alias. Passing those gates does not replace an exact-image hardware test.
 
 [`scripts/package-linux-ps5-k73.sh`](../../scripts/package-linux-ps5-k73.sh)
-packages the kernel as `linux-ps5 7.3.0-2` for pacman, laid out like the
+packages the kernel as `linux-ps5 7.3.0-3` for pacman, laid out like the
 upstream package (kernel, modules, build headers, UAPI headers) plus AMD's
 licence for `ps5_vcn.bin` in `/usr/share/licenses/linux-ps5`. Its install
 script does nothing to `/boot/efi`; the pacman hook below does that.
@@ -214,7 +280,7 @@ script does nothing to `/boot/efi`; the pacman hook below does that.
 checks the base download, its partition table and both partition hashes,
 then in a chroot without network:
 
-1. replaces `linux-ps5 7.1.7-1` with `7.3.0-2` (`pacman -U`, install script
+1. replaces `linux-ps5 7.1.7-1` with `7.3.0-3` (`pacman -U`, install script
    skipped) and removes the old `/boot/initrd.img-7.1.7`;
 2. installs `mlan.ko` and `moal.ko` in `/usr/lib/modules/7.3.0/updates/ps5-iw620`
    and runs `depmod`;
@@ -266,9 +332,11 @@ the loader, but `kexec.sh` is not expected to work with this kernel.
 ## If the display does not come up
 
 The local Run 21 image brought up the display with the VCN block enabled, but
-video decode was not tested and image 2 has not been booted. If VCN fails to
-start, amdgpu can fail to probe. Ethernet and SSH do not depend on it, so they
-should still come up: SSH in and save
+video decode was not tested and neither image 2 nor any forthcoming exact
+Image 3 artifact has a hardware result. If VCN fails to start, amdgpu can fail
+to probe.
+Ethernet and SSH do not depend on it, so they should still come up: SSH in and
+save
 `sudo dmesg` and the boot report. To boot without VCN, find
 `detected ip block number N <vcn_v2_0_0>` in either one and add
 `amdgpu.ip_block_mask=` to the end of the line in `cmdline.txt`, set to
@@ -282,12 +350,13 @@ cachyos1160 changes carry over: hostname `ps5` (the base image has no
 `/etc/hostname`, so no build host name can leak in), `127.0.1.1 ps5`, UTC,
 the first-boot marker, the GPU firmware and `ps5-amdgpu.conf`, the fan
 helper, display re-detect, the boot report, and `mts` for Ethernet. The
-official image's own helpers stay as they are: `grow-rootfs`, `sshd` with
-password login, and the `steam` account with autologin into Gaming Mode.
+official image's `grow-rootfs`, `sshd` with password login, and `steam`
+autologin into Gaming Mode remain in place. Image 3 replaces only the session
+selection helper needed for the bounded `tty1` handoff described below.
 
 What is different:
 
-- **Kernel.** `linux-ps5 7.3.0-2` replaces 7.1.7. The 7.1.7 package also
+- **Kernel.** `linux-ps5 7.3.0-3` replaces 7.1.7. The 7.1.7 package also
   carried a modules-load entry and options for its own Wi-Fi build, the
   `ps5-stage-firmware` helper and `ps5-bt-quiet`; they go with it. The
   profile puts `ps5-bt-quiet` and its unit back unchanged, enabled as before.
@@ -307,44 +376,42 @@ What is different:
   IW620 (PCI `1b4b:2b56`), the service does nothing, `moal` is never loaded
   and Ethernet is unaffected. The firmware helper started as the Ubuntu
   24.04 profile's; here it loads the driver itself instead of reloading it
-  after udev.
-- **Bluetooth.** The kernel applies a local, hash-pinned follow-up after
-  rmux's patch set. It makes the IW620 quirks win over btusb's earlier generic
-  class match and defers both interface-number checks until after the quirk
-  lookup. This fixes the source-level cause found in Run 21, but the resulting
-  CI kernel has not yet been tested on the console.
+  after udev. `/etc/NetworkManager/conf.d/20-ps5-iw620.conf` sets
+  `wifi.powersave=2`; the module options keep `auto_fw_reload=0`. Those reduce
+  exposure to known failure paths but do not prove that the KDE network menu
+  can join every access point.
+- **Bluetooth.** The kernel applies the exact, hash-pinned Bazzite Deck v1.0.3
+  source patch after rmux's patch set. It makes the IW620 quirks win over
+  btusb's earlier generic class match and applies the IW620 interface
+  restriction after the quirk lookup. The image rebuilds the module for this
+  kernel; it never copies Bazzite's binary. The resulting CI kernel still
+  needs DualSense pairing on firmware 11.60.
 - **Fan.** `ps5fan.service` is enabled and runs at boot. It asks the ICC for
-  the tested maximum fan servo pattern (`3`) as a fixed bring-up setting. It
-  is not a temperature-controlled or calibrated fan curve. This is separate
-  from the CPU and GPU frequency drivers; neither frequency module loads at
-  boot.
+  maximum fan servo pattern `3` as a fixed bring-up setting, before the
+  performance service. The tested CFI-1115B reports an unknown fan revision
+  and rejects the dynamic-table update path, so a dynamic curve is not used.
+  Pattern 3 is not a temperature-controlled or calibrated curve, and a
+  successful request does not prove the physical RPM.
 - **Frequency drivers.** `ps5-cpufreq.ko` and `ps5-gpufreq.ko` are part of
-  the kernel package but have no module alias and are in no modules-load
-  file, so nothing loads them at boot. Follow the
-  [tester's opt-in procedure](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md)
-  only after the baseline test. Load one driver per boot, not both; these are
-  alternative commands. For a GPU-driver test:
-
-  ```bash
-  sudo modprobe ps5_gpufreq
-  ```
-
-  For a CPU-driver test, fully power off first and make a separate baseline
-  boot, then run:
-
-  ```bash
-  sudo modprobe ps5_cpufreq
-  ```
-
-  They talk to the SMU directly. Keep `amdgpu dpm=0` while they are in use,
-  since amdgpu's own power management would use the same mailbox. Both were
-  loaded manually in Run 21 and the GPU driver lowered the observed idle
-  temperature from about 50 C to about 36 C. During a brief game load the
-  reported temperature peaked at 84 C; the run ended before thermal
-  equilibrium, so that is not enough evidence to load either driver at boot.
-  They remain manual and experimental. Unloading one does not put the clocks
-  back (`ps5_cpufreq` only unregisters itself), so fully power off rather than
-  using rest mode before the next baseline test.
+  the kernel package but remain absent from the initramfs and generic
+  modules-load files. Image 3 enables `ps5-performance.service` after the fan
+  service succeeds. It requires `amdgpu dpm=0`, loads the GPU module before
+  the CPU module, verifies GPU governor `simple_ondemand` and CPU governor
+  `schedutil`, and disables CPU boost. Both were exercised manually in Run
+  21, but the 84 C peak occurred before thermal equilibrium; automatic startup
+  remains experimental pending a bounded load test. Do not use `rmmod` as a
+  rollback because unloading does not restore the clocks. Create an empty
+  `/boot/efi/disable-ps5-performance` file and fully power off to skip the
+  startup policy on the next boot.
+- **Desktop handoff.** Gaming Mode remains the default. The
+  `ps5-session-switch-listener` service watches only the expected system-bus
+  display-manager request, writes the validated Plasma session token and
+  terminates only the `steam` session on `tty1`. It is the automated form of
+  the manual Run 21 handoff, not yet an exact-image result.
+- **Sleep.** `sleep.target`, `suspend.target`, `hibernate.target`,
+  `hybrid-sleep.target` and `suspend-then-hibernate.target` are masked because
+  Linux suspend is unsupported. GameOS Rest Mode and wake remain the loader's
+  launch carrier only; fully power off after Linux testing.
 - **Boot report.** [`ps5-boot-report`](files/ps5-boot-report) also records
   every hwmon sensor (k10temp and any GPU sensor), the cpufreq and devfreq
   state, the amdgpu clock files when they exist, whether the frequency drivers

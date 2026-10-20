@@ -9,17 +9,9 @@
 #   Non-root: sudo to write the token, then end / restart the session.
 #
 # Direction notes
-#   Plasma -> Gamescope: terminate the Plasma session; agetty autologin re-runs the
-#     profile.d script, reads the token and execs gamescope-session-ps5.
-#   Gamescope -> Plasma: a soft tty handoff leaves the AMD GPU's DP->HDMI bridge in
-#     a state that produces a black HDMI image even with KWin running and a valid
-#     2560x1440 mode set. PCI function-level reset hangs the GPU; amdgpu module
-#     reload fails with EBUSY because fbcon / snd-hda hold refcounts. Only a real
-#     reboot — which power-cycles PCI and re-runs atombios — clears the bridge,
-#     so this direction calls `systemctl reboot`. The next-session token has
-#     already been written, so tty1 boots straight into Plasma after the reboot.
-#     On PS5 the boot chain requires re-running the jailbreak after a reboot;
-#     this is an accepted limitation.
+#   Both directions set the next-session token, then terminate the current tty1
+#   session. agetty autologin respawns it and the profile.d launcher reads the
+#   token before starting Gamescope or Plasma.
 #
 # Optional: write `plasmax11` to ~/.config/ps5-next-session for an X11 escape
 # hatch via startx + startplasma-x11 (ps5-tty-session.sh).
@@ -51,11 +43,23 @@ if [[ $EUID -eq 0 ]]; then
         exit 1
     fi
 
-    mkdir -p "$(dirname "$SESSION_FILE")"
-    printf '%s\n' "$next" >"$SESSION_FILE"
-    sync
-    chown steam:steam "$SESSION_FILE"
-    chmod 644 "$SESSION_FILE"
+    session_dir="${SESSION_FILE%/*}"
+    if [[ ! -d "$session_dir" ]]; then
+        install -d -m 0755 -o steam -g steam "$session_dir"
+    fi
+
+    # Keep readers from observing a truncated token if power is lost or the
+    # session handoff begins while this file is being updated.
+    session_tmp="$(mktemp "$session_dir/.ps5-next-session.XXXXXX")"
+    trap 'rm -f -- "$session_tmp"' EXIT
+    printf '%s\n' "$next" >"$session_tmp"
+    chown steam:steam "$session_tmp"
+    chmod 0644 "$session_tmp"
+    sync -f "$session_tmp"
+    mv -f -- "$session_tmp" "$SESSION_FILE"
+    sync -f "$SESSION_FILE"
+    sync -f "$session_dir"
+    trap - EXIT
     echo "steamos-session-select: next tty1 session set to $next"
     exit 0
 fi

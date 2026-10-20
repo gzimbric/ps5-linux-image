@@ -153,70 +153,79 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 
 ## CachyOS 7.3 for 11.60
 
-> **Public tester prerelease; the exact CI image is still unbooted.**
-> [Download image 2](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2)
-> only for a retail PS5 on firmware 11.60, use the recommended bounded Wi-Fi
+> **Public tester work; every exact CI image needs its own hardware result.**
+> The latest published artifact is still
+> [image 2](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2).
+> Use it only on a retail PS5 running firmware 11.60, with the bounded Wi-Fi
 > ELF from the [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21),
 > and follow the [image-2 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md).
-> Run 21 booted an earlier local image, not this CI artifact. Flashing erases
-> the entire selected drive, so verify the target first. Keep the console on a
-> trusted LAN until changing the default `steam` / `steam` password, fully
-> power off between attempts instead of using Rest Mode, never redistribute
-> the console-dumped `pcieuartiw620_combo_v1.bin`, and redact reports before
-> posting them.
+> Run 21 booted an earlier local image, not image 2. Flashing erases the
+> selected drive. Keep the default-password system on a trusted LAN, never
+> redistribute the console-dumped `pcieuartiw620_combo_v1.bin`, and redact
+> reports before posting them.
 
-The current test candidate is **image 2**, tag
-`cachyos1160-k73-image-2`, which resolves to source commit
-`346088a48f66eb956dafdec9de5085e73b2d44a5` and packages
-`linux-ps5 7.3.0-2`. Run 21 booted an earlier local build from this profile;
-it did **not** boot image 1 or image 2. Image 1 is superseded by image 2, and
-image 2 remains unbooted until it passes a fresh console run.
-
-[Workflow run 39481460775](https://github.com/gzimbric/ps5-linux-image/actions/runs/39481460775)
-completed successfully and created the
-[public tester prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2).
-It has one image archive, `ps5-cachyos1160-k73.img.xz`, at 1,943,471,712
-bytes with SHA-256
-`8b785243f79a32a4155cc1e39bed01d580e25ca514e88abbfed1a8a8157a281a`.
-It decompresses to the 12,582,912,000-byte raw image with SHA-256
-`3798c7dba96412c5301eb201d8bf8aa4edd1b2f80a743dfd7b90b2a79222c62d`.
-Those are verified build and release facts, not a hardware result. Publishing
-the prerelease for testing does not change the exact image's unbooted status.
-
-The profile starts with the official CachyOS image and replaces its kernel
-with mainline v7.3 plus the exact PS5 patch set published by rmux (Armandas
-Kvietkus),
+The Image 3 source candidate packages the new kernel as `linux-ps5 7.3.0-3`.
+It keeps mainline v7.3 and the exact PS5 patch set published by rmux (Armandas Kvietkus),
 [rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1)
-at `36f173f39e5e76c00c4e366a7b909f33bc665ad5`. That set includes rmux's PS5
-CPU and GPU frequency drivers. Image 2 does not substitute a different PS5
-kernel patch set. It adds a separate, hash-pinned IW620 Bluetooth quirk
-follow-up (`54d7addbb4cd95c943f9a4485229ac5516ad08ebe0f4aa02fd72cf33298fa0a2`)
-that restores the IW620 quirks-table entry and post-lookup interface-check
-ordering present in merged [ps5-linux patch-set PR #35](https://github.com/ps5-linux/ps5-linux-patches/pull/35)
-but absent from the pinned rmux 7.3 patch, while retaining rmux's 7.3 IW620
-quirk flags. It also changes the IW620 Wi-Fi startup order so firmware is
-copied before the driver's first probe. Those two image-2 changes still need
-hardware tests.
+at `36f173f39e5e76c00c4e366a7b909f33bc665ad5`. After that patch set it applies
+the exact `ps5-btusb-quirks-fix.patch` asset published with
+[VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3),
+SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.
+The patch is rebuilt as part of this kernel; a prebuilt `btusb.ko` from another
+image must not be copied into it. Bazzite reports successful DualSense pairing
+on Linux 7.3 and firmware 13.60, which is useful source evidence but is not an
+11.60 result for this image. Image 3 also updates the out-of-tree Wi-Fi source to
+`ps5-linux/ps5-linux-mwifiex` commit
+`4bce848dd098bf74fbafd0078463da3d9f0d7f80`. That Wi-Fi revision adds the
+current HE capability and transmit-path fixes. NetworkManager is configured
+with `wifi.powersave=2` to avoid the power-saving path implicated in earlier
+wedges. These are source and configuration changes, not proof that the exact
+Image 3 artifact works on 11.60. Joining by name with
+`sudo nmcli --ask device wifi connect <wifi-name>` remains the fallback if
+the KDE network menu cannot join.
 
-[VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3)
-independently reports a paired DualSense on a CFI-10xx PS5 running firmware
-13.60 after the same core `btusb` correction. Its patch is not byte-identical
-to this one. That result supports the diagnosis, but it is not an 11.60
-hardware test of image 2, which remains unbooted.
+Image 3 turns the previously manual CPU and GPU frequency tests into a
+guarded startup policy. `ps5-performance.service` starts only after
+`ps5fan.service` succeeds, verifies `amdgpu dpm=0`, then loads the GPU driver
+before the CPU driver. The expected policy is GPU `simple_ondemand`, CPU
+`schedutil`, and CPU boost off. Do not unload either module: unregistering a
+driver does not restore the clocks. To skip this experimental startup path,
+create an empty `/boot/efi/disable-ps5-performance` file and fully power off
+before the next boot.
 
-The frequency drivers are built as modules and remain manual-only. The image
-also ships the IW620 Wi-Fi driver built for this kernel, but no Wi-Fi
-firmware, holds the kernel package in pacman, and updates the boot files from
-a pacman hook. Steam's **Switch to Desktop** action and joining Wi-Fi from
-the KDE network menu both failed in Run 21 and are not fixed by image 2;
-manual session switching and `nmcli` remain the recorded workarounds. VCN
-initialized and displayed a picture in Run 21, but video decode was not
-tested. Image 2 enables `ps5fan.service` at boot; it requests the tested
-maximum fan servo pattern (`3`) as a fixed bring-up setting, not a dynamic fan
-curve. The CPU and GPU frequency drivers are separate and remain unloaded at
-boot and manual-only. Follow the [tester guide's opt-in procedure](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md)
-only after the baseline test: try one driver per boot, monitor it, and fully
-power off afterward.
+The fan service requests the fixed maximum servo pattern (`3`) before the
+performance service starts. The tested CFI-1115B identifies its fan as an
+unknown revision, so its dynamic table does not apply. Pattern 3 is the
+safest bring-up request presently available, not a calibrated temperature
+curve, and physical RPM has not been measured.
+
+Gaming Mode remains the default. Image 3 adds a tightly scoped system-bus
+listener for Steam's display-manager request; it selects Plasma and ends only
+the `steam` session on `tty1`, reproducing the manual handoff that worked in
+Run 21. This still needs an exact-image console test. On image 2, recover from
+a stuck **Switch to Desktop** from SSH or another TTY with:
+
+```bash
+sudo steamos-session-select plasma
+sudo systemctl restart getty@tty1.service
+```
+
+If HDMI does not switch, try `Ctrl+Alt+F1`; `Ctrl+Alt+F2` opens another TTY
+when a USB keyboard is available. Linux suspend, hibernate, hybrid sleep and
+suspend-then-hibernate are unsupported and masked in Image 3. GameOS Rest
+Mode and wake are only the carrier used to launch the loader; once Linux is
+running, fully power off between test boots rather than trying Linux sleep.
+
+Image 3 remains a prerelease until the exact hosted-CI artifact completes at
+least three to five cold boots, DualSense pairing, a 60-minute Bluetooth and
+Wi-Fi coexistence run, and a bounded thermal load. The KDE Wi-Fi join path,
+Bluetooth, automatic session handoff, startup clock policy, fan response and
+video decode must not be treated as proven before those tests. Image 2's
+release hashes and hardware status remain recorded in its release and tester
+guide. The separate
+[Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md)
+stays marked as a source-candidate plan until CI provides the exact artifact
+identity.
 
 The boot files are not the exact sizes the earlier 11.60 loaders require, so
 the image needs the
@@ -253,11 +262,11 @@ only that exact cache key and builds the kernel again on a miss. The cached
 handoff has its own SHA-256 manifest, which is checked after restore and again
 after transfer to the image job. There are no partial-key fallbacks. All
 compilation, image assembly, compression, and release uploading happens on
-GitHub's runners, so the machine that pushes the source does not relay the
-image. The full image workflow runs when a tag matching
+GitHub's runners. A Mac is not part of the build or artifact path and does
+not relay the image. The full image workflow runs when a tag matching
 `cachyos1160-k73-image-*` is pushed or when it is started manually. A
 successful workflow validates the build and image structure; it does not
-change image 2's unbooted hardware status.
+establish a hardware result for that exact artifact.
 
 ## Prerequisites
 

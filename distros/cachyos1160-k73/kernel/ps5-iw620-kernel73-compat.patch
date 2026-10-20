@@ -1,10 +1,11 @@
 ps5-iw620-kernel73-compat.patch: build the NXP IW620 Wi-Fi driver on Linux 7.3
 
-Applies to nxp-imx/mwifiex a5fe4e1 (lf-6.18.2_1.0.0) after the four patches
-from ps5-linux/ps5-linux-mwifiex 4aff908 that the 7.1.7 Ubuntu Wi-Fi build
-also used, in this order: ps5-iw620.patch,
-ps5-iw620-cmd-timeout-recover.patch, ps5-iw620-kernel71-compat.patch,
-ps5-iw620-rtnl-bounded-wait.patch.
+Applies to nxp-imx/mwifiex a5fe4e1 (lf-6.18.2_1.0.0) after seven patches
+from ps5-linux/ps5-linux-mwifiex 4bce848, in this order:
+ps5-iw620.patch, ps5-iw620-cmd-timeout-recover.patch,
+ps5-iw620-kernel71-compat.patch, ps5-iw620-rtnl-bounded-wait.patch,
+ps5-iw620-he.patch, ps5-iw620-tx-min128.patch and
+ps5-iw620-tx-priority.patch.
 Do not combine it with ps5-iw620-kernel72-compat.patch.
 
 Linux 7.3 changed three things the driver uses. Every change below sits

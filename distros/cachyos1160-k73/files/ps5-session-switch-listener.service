@@ -1,0 +1,15 @@
+[Unit]
+Description=Handle Steam desktop switch requests for the PS5 tty session
+Wants=dbus.service
+After=dbus.service
+Before=getty@tty1.service
+ConditionPathExists=/etc/ps5-use-tty-sessions
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/ps5-session-switch-listener
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
