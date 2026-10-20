@@ -201,7 +201,11 @@ What is different:
   every hwmon sensor (k10temp and any GPU sensor), the cpufreq and devfreq
   state, the amdgpu clock files when they exist, whether the frequency drivers
   are loaded, the Wi-Fi state, and the 7.3 kernel messages worth checking
-  (frequency drivers, VCN, Salina).
+  (frequency drivers, VCN, Salina). With Wi-Fi on, it keeps the tester's
+  network out of the copy on the boot partition: the Wi-Fi network names the
+  console knows are replaced with `<wifi-name>`, wpa_supplicant's log lines
+  are left out and MAC addresses are masked. The console's IP addresses stay
+  in, so read the report before posting it.
 - **Kernel hold and boot-file updates.** `IgnorePkg = linux-ps5` keeps
   `pacman -Syu` from replacing the kernel. The pacman hook
   [`95-ps5-boot-files.hook`](files/95-ps5-boot-files.hook) runs

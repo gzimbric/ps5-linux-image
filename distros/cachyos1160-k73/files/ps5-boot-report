@@ -18,6 +18,47 @@ trap 'exit 1' HUP INT TERM
 summary=$(mktemp /run/ps5-boot-summary.XXXXXX)
 bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
 
+# The report is copied to the FAT partition so testers can share it. It must
+# not carry their Wi-Fi network name or access point address (a BSSID can be
+# looked up to find where it is). The names this console knows, from its
+# saved NetworkManager Wi-Fi profiles and the last scan, are replaced with
+# <wifi-name>, wpa_supplicant's lines are dropped, and MAC addresses are
+# masked, including the partly masked ones the Wi-Fi driver prints. IP
+# addresses stay in.
+PS5_REPORT_WIFI_NAMES=$(
+    for profile in /etc/NetworkManager/system-connections/* \
+        /run/NetworkManager/system-connections/*; do
+        [ -f "$profile" ] || continue
+        grep -q '^\[wifi\]' "$profile" 2>/dev/null || continue
+        sed -n 's/^id=//p; s/^ssid=//p' "$profile" 2>/dev/null
+    done
+    timeout 5 nmcli --escape no --get-values SSID device wifi list --rescan no 2>/dev/null
+) || true
+export PS5_REPORT_WIFI_NAMES
+
+scrub() {
+    awk '
+        BEGIN { count = split(ENVIRON["PS5_REPORT_WIFI_NAMES"], names, "\n") }
+        /wpa_supplicant/ { next }
+        {
+            line = $0
+            for (i = 1; i <= count; i++) {
+                # nmcli shows a hidden network as an empty name or --.
+                if (names[i] == "" || names[i] == "--")
+                    continue
+                out = ""
+                while ((p = index(line, names[i])) > 0) {
+                    out = out substr(line, 1, p - 1) "\001"
+                    line = substr(line, p + length(names[i]))
+                }
+                line = out line
+            }
+            gsub(/\001/, "<wifi-name>", line)
+            print line
+        }' |
+        sed -E 's/\b[0-9A-Fa-fXx]{2}(:[0-9A-Fa-fXx]{2}){5}\b/xx:xx:xx:xx:xx:xx/g'
+}
+
 {
     echo "PS5 CachyOS 7.3 boot report"
     printf 'generated='; date -u +%Y-%m-%dT%H:%M:%SZ
@@ -51,7 +92,7 @@ bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
     ip -brief link 2>&1 || true
     ip -brief address 2>&1 || true
     ip route 2>&1 || true
-    nmcli --terse --fields DEVICE,TYPE,STATE,CONNECTION device status 2>&1 || true
+    nmcli --terse --fields DEVICE,TYPE,STATE device status 2>&1 || true
 
     echo
     echo "[wifi]"
@@ -84,9 +125,10 @@ bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
         done
         printf '%s driver=%s net=%s\n' "${dev##*/}" "$driver" "${net# }"
     done
-    # Count only; network names stay out of the report.
+    # Count only; network names stay out of the report. --rescan no uses the
+    # last scan instead of waiting for a new one.
     printf 'wifi networks in scan: '
-    nmcli --terse --fields SSID device wifi list 2>/dev/null | wc -l
+    timeout 5 nmcli --terse --fields SSID device wifi list --rescan no 2>/dev/null | wc -l
     dmesg --color=never 2>&1 | grep -E 'wlan:|WLAN|PCIEIW620|FW download|Request firmware|request_firmware' \
         | tail -n 40 || true
 
@@ -178,7 +220,8 @@ bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
 
     echo
     echo "[services]"
-    systemctl --no-pager --full status \
+    # --lines=0: the unit log lines are in the journal tail, scrubbed.
+    systemctl --no-pager --full --lines=0 status \
         NetworkManager.service sshd.service getty@tty1.service \
         first-boot.service ps5fan.service ps5-amdgpu-reprobe.service \
         ps5-iw620-firmware.service ps5-bt-quiet.service \
@@ -188,13 +231,14 @@ bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
 } > "$summary" 2>&1
 
 # Preserve the bring-up summary even if a noisy journal has very large records.
-head -c 393216 "$summary" > "$bounded"
+# Everything is scrubbed before it is cut to size, so the limits still hold.
+scrub < "$summary" | head -c 393216 > "$bounded"
 
 {
     printf '\n[kernel-tail; final 256 KiB]\n'
-    dmesg --color=never 2>&1 | tail -n 500 | tail -c 262144
+    dmesg --color=never 2>&1 | tail -n 500 | scrub | tail -c 262144
     printf '\n[journal-tail; final 383 KiB]\n'
-    journalctl -b --no-pager -n 800 2>&1 | tail -c 392192
+    journalctl -b --no-pager -n 800 2>&1 | scrub | tail -c 392192
 } >> "$bounded"
 
 test -s "$bounded"

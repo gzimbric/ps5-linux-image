@@ -45,7 +45,7 @@ A usr/lib/modules/7.3.0/updates/ps5-iw620/mlan.ko f 0644 0 0 @MLAN_SIZE@ @MLAN_S
 A usr/lib/modules/7.3.0/updates/ps5-iw620/moal.ko f 0644 0 0 @MOAL_SIZE@ @MOAL_SHA256@
 A usr/local/sbin/ps5-1160-check-boot-files f 0755 0 0 6890 6eafdc77607239ba92e9e834f7fbfd6553f4f6fcddf7b0cbbebba3ce38b709f0
 A usr/local/sbin/ps5-amdgpu-reprobe f 0755 0 0 797 6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
-A usr/local/sbin/ps5-boot-report f 0755 0 0 8572 213c6ed834ac40756bef6686fb7554cc1780ce3eee0acd2b31dd1df401492b71
+A usr/local/sbin/ps5-boot-report f 0755 0 0 10549 3452d986cde6b056a4dd981d163a31182e6d5a751a8eb89078dacb2b4cccae90
 A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2036 dc5fa815b87d8d7219422bc0a48c82b7840916a8cbe9f7b6bdc88c1c256f4e80
 A usr/local/sbin/ps5-update-boot-files f 0755 0 0 2785 1a0ab566627e59bb82ca93a0065bdae5cd634d2fb4b1531f3adb19923f301dc9
 A usr/local/sbin/ps5_fan_max f 0755 0 0 @PS5_FAN_MAX_SIZE@ @PS5_FAN_MAX_SHA256@

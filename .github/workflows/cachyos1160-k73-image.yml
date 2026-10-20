@@ -391,7 +391,7 @@ jobs:
           - The PS5 CPU and GPU frequency drivers are included but not loaded at boot. To try them, run \`sudo modprobe ps5_gpufreq\` and then \`sudo modprobe ps5_cpufreq\`. A reboot goes back to the defaults.
           - amdgpu now brings up the VCN video block. Its firmware, \`ps5_vcn.bin\` from AMD, is built into the kernel; the licence is in \`/usr/share/licenses/linux-ps5/LICENSE.amdgpu\`.
           - The onboard IW620 Wi-Fi driver is installed and no longer blacklisted, but the image has no Wi-Fi firmware. Wi-Fi only comes up with the Wi-Fi build of the loader, which writes this console's own firmware to \`lib/nxp/\` on the boot partition; the image installs it at boot. With any other loader, use Ethernet.
-          - The boot report (\`ps5-boot-report.txt\` on the boot partition) also records temperatures, CPU and GPU clocks, and whether the frequency drivers are loaded.
+          - The boot report (\`ps5-boot-report.txt\` on the boot partition) also records temperatures, CPU and GPU clocks, and whether the frequency drivers are loaded. It replaces Wi-Fi network names with \`<wifi-name>\` and masks MAC addresses, but it still has the console's IP addresses, so read it before posting it.
           - pacman holds \`linux-ps5\` back from updates. After a kernel or initramfs change, a pacman hook rebuilds the initramfs and updates \`bzImage\` and \`initrd.img\` on the boot partition, if they pass the loader's checks.
 
           Thanks to rmux (Armandas Kvietkus) for the 7.3 port and the frequency drivers.
