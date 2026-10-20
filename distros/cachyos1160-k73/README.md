@@ -92,9 +92,12 @@ manual in Run 21:
   `ps5-btusb-quirks-fix.patch` asset from Bazzite Deck v1.0.3, pinned at
   SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.
   It is rebuilt into this kernel rather than copying Bazzite's prebuilt
-  `btusb.ko`. Their Linux 7.3 and firmware 13.60 result supports the source
-  choice, but the exact image still needs 11.60 DualSense pairing and
-  coexistence testing.
+  `btusb.ko`. The image also selects the working Bazzite BlueZ path:
+  `AlwaysPairable=true`, `JustWorksRepairing=always`, `UserspaceHID=true`,
+  and explicit pairing timeout, controller mode, privacy and auto-enable
+  values. Their Linux 7.3 and firmware 13.60 result supports this combination,
+  but the exact image still needs 11.60 DualSense pairing and coexistence
+  testing.
 - **Fan:** requests fixed maximum servo pattern `3` before the performance
   policy starts. The tested CFI-1115B reports an unknown fan revision, so the
   dynamic fan table does not update on that console. This is a conservative
@@ -153,9 +156,16 @@ compiles a matching `btusb.ko`; modules from another image must not be copied
 over it.
 
 Bazzite reports a paired DualSense on a CFI-10xx PS5 running firmware 13.60
-with Linux 7.3 after this correction. That is useful source-level evidence,
-but it is not an 11.60 hardware result for Image 3. Image 2 remains the
-published, unbooted artifact and contains its earlier non-identical follow-up.
+with Linux 7.3 after this correction. The exact Bazzite base used by that
+release is OCI digest
+`sha256:96301a1520b5bb63db95640896300c10ae3b1fcf8bf10681af154514395e1634`,
+built from Bazzite revision
+[`2fab72c`](https://github.com/ublue-os/bazzite/tree/2fab72cbc9a3257d80c607e173f22527aea3b39b).
+It sets `AlwaysPairable=true`, `JustWorksRepairing=always` and
+`UserspaceHID=true`; Image 3 carries those active values and makes the other
+effective BlueZ defaults explicit. That is useful source-level evidence, but
+it is not an 11.60 hardware result for Image 3. Image 2 remains the published,
+unbooted artifact and contains its earlier non-identical follow-up.
 
 The out-of-tree Wi-Fi modules are a separate driver build. Image 3 pins
 `ps5-linux/ps5-linux-mwifiex` at
@@ -384,8 +394,12 @@ What is different:
   source patch after rmux's patch set. It makes the IW620 quirks win over
   btusb's earlier generic class match and applies the IW620 interface
   restriction after the quirk lookup. The image rebuilds the module for this
-  kernel; it never copies Bazzite's binary. The resulting CI kernel still
-  needs DualSense pairing on firmware 11.60.
+  kernel; it never copies Bazzite's binary. `/etc/bluetooth/main.conf` keeps
+  the adapter pairable, permits the DualSense Just-Works repair and pins the
+  same controller, privacy and auto-enable behavior used by the working
+  Bazzite image. `/etc/bluetooth/input.conf` explicitly keeps
+  `UserspaceHID=true`; `uhid` and `hid-playstation` are built for this kernel.
+  The resulting CI image still needs DualSense pairing on firmware 11.60.
 - **Fan.** `ps5fan.service` is enabled and runs at boot. It asks the ICC for
   maximum fan servo pattern `3` as a fixed bring-up setting, before the
   performance service. The tested CFI-1115B reports an unknown fan revision
@@ -463,6 +477,28 @@ passwordless `sudo`. SSH keeps the official image's settings, so password
 login works and root login does not. Keep the console on a trusted LAN and
 change the password after the first boot with `passwd`. SSH host keys are
 generated on the console at first boot.
+
+## DualSense pairing
+
+Open KDE's Bluetooth settings and keep the pairing window open while the pad
+is blinking (hold **Create + PS**). For a terminal-only test, register an agent
+and keep the adapter pairable before starting the pair:
+
+```text
+bluetoothctl
+power on
+agent on
+default-agent
+pairable on
+scan on
+pair <controller-mac>
+trust <controller-mac>
+connect <controller-mac>
+```
+
+Do not install `disable_ertm=1`, replace `btusb.ko`, or switch this image to
+the kernel-HID workaround before the exact Bazzite-compatible path is tested.
+The boot report records the active BlueZ policy and relevant modules.
 
 ## Not included
 

@@ -143,9 +143,18 @@ scrub() {
     fi
     printf 'btusb vermagic='; modinfo -F vermagic btusb 2>&1 || true
     printf 'btusb srcversion='; modinfo -F srcversion btusb 2>&1 || true
-    lsmod 2>&1 | grep -E '^(btusb|btintel|btbcm|btrtl|btmtk|bluetooth|hid_playstation)' || true
+    lsmod 2>&1 | grep -E '^(btusb|btintel|btbcm|btrtl|btmtk|bluetooth|uhid|hidp|hid_playstation)' || true
+    echo 'BlueZ main policy:'
+    grep -E '^(AlwaysPairable|PairableTimeout|ControllerMode|Privacy|JustWorksRepairing|AutoEnable)=' \
+        /etc/bluetooth/main.conf 2>&1 || true
+    echo 'BlueZ HID policy:'
+    grep -E '^UserspaceHID=' /etc/bluetooth/input.conf 2>&1 || true
     bluetoothctl list 2>&1 || true
     bluetoothctl show 2>&1 || true
+    bluetoothctl devices 2>&1 || true
+    bluetoothctl devices Paired 2>&1 || true
+    bluetoothctl devices Connected 2>&1 || true
+    grep -Ei -A8 'DualSense|Wireless Controller' /proc/bus/input/devices 2>&1 || true
     if command -v btmgmt >/dev/null 2>&1; then
         btmgmt info 2>&1 || true
     fi

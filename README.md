@@ -173,8 +173,11 @@ the exact `ps5-btusb-quirks-fix.patch` asset published with
 SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.
 The patch is rebuilt as part of this kernel; a prebuilt `btusb.ko` from another
 image must not be copied into it. Bazzite reports successful DualSense pairing
-on Linux 7.3 and firmware 13.60, which is useful source evidence but is not an
-11.60 result for this image. Image 3 also updates the out-of-tree Wi-Fi source to
+on Linux 7.3 and firmware 13.60. Image 3 also matches that working image's
+BlueZ path: the controller stays pairable, Just-Works repair is accepted,
+BlueZ uses UHID, and pairing timeout, controller mode, privacy and auto-enable
+are explicit. This is useful source evidence but is not an 11.60 result for
+this image. Image 3 also updates the out-of-tree Wi-Fi source to
 `ps5-linux/ps5-linux-mwifiex` commit
 `4bce848dd098bf74fbafd0078463da3d9f0d7f80`. That Wi-Fi revision adds the
 current HE capability and transmit-path fixes. NetworkManager is configured

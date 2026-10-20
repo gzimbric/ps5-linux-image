@@ -40,6 +40,8 @@ OLD_PACKAGE="linux-ps5 7.1.7-1"
 MKINITCPIO_CONF_SHA256=6329d81d796228ef0a2c3ee3b16be551f4403dcb129defbab91aa4279f40bc77
 ROOT_VMLINUZ_717_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee34e99cde
 ROOT_INITRD_717_SHA256=ba6dd1d0e69149e6be60bfd655b4bfc8cac0eee546e1ba478f3bdd1240965a56
+BLUEZ_MAIN_CONF_SHA256=d3762eb24785530885ffa51fffc81b078f5bb362d83cf2462989dbb6b2081912
+BLUEZ_INPUT_CONF_SHA256=d85aa14cab44a058d1ae13a0774961d011da735b49ae4d6546e2cc2e396c6d3d
 
 KVER=7.3.0
 NEW_PACKAGE="linux-ps5 7.3.0-3"
@@ -493,6 +495,47 @@ log "Bluetooth helper"
 add_file 0755 "$PROFILE/files/ps5-bt-quiet" usr/local/sbin/ps5-bt-quiet
 add_file 0644 "$PROFILE/files/ps5-bt-quiet.service" etc/systemd/system/ps5-bt-quiet.service
 add_link ../ps5-bt-quiet.service etc/systemd/system/multi-user.target.wants/ps5-bt-quiet.service
+
+# The working Bazzite Deck v1.0.3 image uses BlueZ's userspace HID path and
+# keeps the controller pairable while accepting the DualSense Just-Works
+# repair. Apply those settings to the pinned CachyOS BlueZ files instead of
+# carrying a foreign module or a separate pairing daemon. PairableTimeout=0,
+# ControllerMode=dual and AutoEnable=true are current defaults; spelling them
+# out makes the tested policy unambiguous in reports and across upgrades.
+expect_sha "$R/etc/bluetooth/main.conf" "$BLUEZ_MAIN_CONF_SHA256" \
+  "/etc/bluetooth/main.conf before PS5 policy"
+expect_sha "$R/etc/bluetooth/input.conf" "$BLUEZ_INPUT_CONF_SHA256" \
+  "/etc/bluetooth/input.conf before PS5 policy"
+for old in '#AlwaysPairable = false' '#PairableTimeout = 0' \
+  '#ControllerMode = dual' '#Privacy = off' \
+  '#JustWorksRepairing = never' '#AutoEnable=true'; do
+  [[ $(grep -cxF "$old" "$R/etc/bluetooth/main.conf") == 1 ]] ||
+    die "/etc/bluetooth/main.conf does not contain exactly one '$old'"
+done
+sed -i \
+  -e 's/^#AlwaysPairable = false$/AlwaysPairable=true/' \
+  -e 's/^#PairableTimeout = 0$/PairableTimeout=0/' \
+  -e 's/^#ControllerMode = dual$/ControllerMode=dual/' \
+  -e 's/^#Privacy = off$/Privacy=device/' \
+  -e 's/^#JustWorksRepairing = never$/JustWorksRepairing=always/' \
+  -e 's/^#AutoEnable=true$/AutoEnable=true/' \
+  "$R/etc/bluetooth/main.conf"
+[[ $(grep -cxF '#UserspaceHID=true' "$R/etc/bluetooth/input.conf") == 1 ]] ||
+  die "/etc/bluetooth/input.conf does not contain exactly one '#UserspaceHID=true'"
+sed -i 's/^#UserspaceHID=true$/UserspaceHID=true/' "$R/etc/bluetooth/input.conf"
+for value in AlwaysPairable=true PairableTimeout=0 ControllerMode=dual \
+  Privacy=device JustWorksRepairing=always AutoEnable=true; do
+  [[ $(grep -cxF "$value" "$R/etc/bluetooth/main.conf") == 1 ]] ||
+    die "/etc/bluetooth/main.conf does not contain exactly one '$value'"
+done
+[[ $(grep -cxF 'UserspaceHID=true' "$R/etc/bluetooth/input.conf") == 1 ]] ||
+  die "/etc/bluetooth/input.conf does not select the userspace HID path"
+for module in btusb uhid hid_playstation; do
+  file=$(module_file "$module")
+  [[ $file == "/usr/lib/modules/$KVER/kernel/"*".ko" ]] ||
+    die "$module is not installed ($file)"
+done
+echo "ok  Bazzite-compatible BlueZ pairing policy and userspace HID path"
 
 log "Frequency drivers and guarded startup"
 for module in ps5_cpufreq ps5_gpufreq; do

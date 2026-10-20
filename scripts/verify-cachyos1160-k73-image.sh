@@ -158,6 +158,29 @@ grep -qx 'wifi.powersave=2' "$R/etc/NetworkManager/conf.d/20-ps5-iw620.conf" ||
   die "NetworkManager Wi-Fi power saving is not disabled"
 ok "IW620 driver installed, udev alias load blocked, no firmware, NetworkManager power saving disabled"
 
+# --------------------------------------------------------------- Bluetooth
+
+# Match the userspace half of the working Bazzite Deck v1.0.3 path. The
+# kernel-side btusb correction is compiled into the package; these settings
+# keep the controller pairable, accept the DualSense repair, and use UHID.
+for value in AlwaysPairable=true PairableTimeout=0 ControllerMode=dual \
+  Privacy=device JustWorksRepairing=always AutoEnable=true; do
+  [[ $(grep -cxF "$value" "$R/etc/bluetooth/main.conf") == 1 ]] ||
+    die "/etc/bluetooth/main.conf does not contain exactly one '$value'"
+done
+[[ $(grep -cxF 'UserspaceHID=true' "$R/etc/bluetooth/input.conf") == 1 ]] ||
+  die "/etc/bluetooth/input.conf does not select the userspace HID path"
+for module in btusb uhid hid_playstation; do
+  f=$(find "$m/kernel" -name "${module//_/-}.ko" -print)
+  [[ -n $f ]] || die "$module is not installed"
+  grep -q "^${f#"$m/"}:" "$m/modules.dep" || die "$module is not in modules.dep"
+done
+if grep -RqsE '(^|[[:space:]])disable_ertm=1([[:space:]]|$)' \
+  "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d"; then
+  die "disable_ertm=1 is installed"
+fi
+ok "Bazzite-compatible BlueZ pairing policy, userspace HID path and Bluetooth modules"
+
 # ------------------------------------------------------- frequency drivers
 
 for module in ps5-cpufreq ps5-gpufreq; do
