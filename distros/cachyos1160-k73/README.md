@@ -13,11 +13,22 @@ worked in that run. Run 21 did not boot either tagged CI image. The current
 image-2 candidate supersedes image 1 but is still unbooted; its Bluetooth and
 Wi-Fi load-order fixes need a fresh hardware run.
 
+> **Tester warning:** [image 2 is a public prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2),
+> but the exact CI image has not booted on a console. It is only for retail PS5
+> firmware 11.60 and requires the
+> [bounded 11.60 loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
+> Use the bounded Wi-Fi ELF for the first run and follow the
+> [image-2 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md).
+> Flashing overwrites the entire target drive. Keep the default-password system
+> on a trusted LAN, change the password immediately, fully power off instead of
+> using Rest Mode, never redistribute the console-dumped
+> `pcieuartiw620_combo_v1.bin`, and redact reports before posting them.
+
 The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
 (sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
 
-## Image 2 candidate
+## Image 2 tester prerelease
 
 | Item | Value |
 |------|-------|
@@ -25,17 +36,17 @@ built on 2026-08-29 from upstream commit `52db0a4`
 | Source commit | `346088a48f66eb956dafdec9de5085e73b2d44a5` |
 | Kernel package | `linux-ps5 7.3.0-2` |
 | CI | [workflow 39481460775](https://github.com/gzimbric/ps5-linux-image/actions/runs/39481460775): success |
-| Release state | private draft |
+| Release state | [public tester prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2) |
 | Release image | one `ps5-cachyos1160-k73.img.xz`; 1,943,471,712 bytes; never split |
 | Compressed SHA-256 | `8b785243f79a32a4155cc1e39bed01d580e25ca514e88abbfed1a8a8157a281a` |
 | Raw image | 12,582,912,000 bytes; SHA-256 `3798c7dba96412c5301eb201d8bf8aa4edd1b2f80a743dfd7b90b2a79222c62d` |
 | Hardware status | unbooted |
 
-The downloaded draft assets, GitHub digests, `SHA256SUMS`, XZ stream and raw
-image hash were checked after the run. The release workflow aborts before
+The downloaded prerelease assets, GitHub digests, `SHA256SUMS`, XZ stream and
+raw image hash were checked after the run. The release workflow aborts before
 creating a draft if the compressed image is 2 GiB or larger. A completed
-build, verifier pass, or draft release is software validation only; none of
-them is a console boot.
+build or verifier pass, and publication of a prerelease, provide only software
+and release validation; none of them is a console boot.
 
 Compared with the local image that booted in Run 21, image 2:
 
@@ -98,12 +109,10 @@ The boot files are not the exact sizes the earlier 11.60 loader builds
 require, so every one of them refuses this image. That includes the
 published DMA E820 loader (`firmware-11.60-dma-e820-run18`) and the
 `linux-1160-dma-e820-wifi` target, whose name is close to the Wi-Fi one
-below. This image needs a bounded build of the 11.60 loader from
-[gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader)
-`main`. The exact Run 21 artifacts were built at commit `98925a2`; current
-`main` reproduces their hashes and adds direct-target and CI safeguards. The
-prebuilt release remains a private draft, so public testers should build from
-`main`:
+below. This image needs the
+[public bounded-loader tester prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
+The exact Run 21 artifacts were built at commit `98925a2`; current loader
+`main` reproduces their hashes and adds direct-target and CI safeguards:
 
 | Target | ELF sha256 |
 |--------|------------|
@@ -113,7 +122,10 @@ prebuilt release remains a private draft, so public testers should build from
 The bounded Wi-Fi build, with the `e9fe6469…` hash above, booted Run 21 and
 supplied the console's Wi-Fi firmware. The non-Wi-Fi bounded build has not
 been booted on hardware yet. Neither image 1 nor image 2 was the image used
-in Run 21, and image 2 is still unbooted.
+in Run 21, and image 2 is still unbooted. The ELF does not contain the Wi-Fi
+firmware: it copies this console's own firmware to the USB at runtime. Do not
+upload or redistribute `lib/nxp/pcieuartiw620_combo_v1.bin` from the boot
+partition or `/lib/firmware/nxp/pcieuartiw620_combo_v1.bin` from Linux.
 
 The bounded loader checks the files instead of their sizes:
 [`files/ps5-1160-check-boot-files`](files/ps5-1160-check-boot-files) runs
@@ -301,12 +313,26 @@ What is different:
   class match and defers both interface-number checks until after the quirk
   lookup. This fixes the source-level cause found in Run 21, but the resulting
   CI kernel has not yet been tested on the console.
+- **Fan.** `ps5fan.service` is enabled and runs at boot. It asks the ICC for
+  the tested maximum fan servo pattern (`3`) as a fixed bring-up setting. It
+  is not a temperature-controlled or calibrated fan curve. This is separate
+  from the CPU and GPU frequency drivers; neither frequency module loads at
+  boot.
 - **Frequency drivers.** `ps5-cpufreq.ko` and `ps5-gpufreq.ko` are part of
   the kernel package but have no module alias and are in no modules-load
-  file, so nothing loads them at boot. Load them by hand, one at a time:
+  file, so nothing loads them at boot. Follow the
+  [tester's opt-in procedure](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md)
+  only after the baseline test. Load one driver per boot, not both; these are
+  alternative commands. For a GPU-driver test:
 
   ```bash
   sudo modprobe ps5_gpufreq
+  ```
+
+  For a CPU-driver test, fully power off first and make a separate baseline
+  boot, then run:
+
+  ```bash
   sudo modprobe ps5_cpufreq
   ```
 
@@ -367,8 +393,9 @@ What is different:
 
 The account comes from the official image: user `steam`, password `steam`,
 passwordless `sudo`. SSH keeps the official image's settings, so password
-login works and root login does not. Change the password after the first
-boot with `passwd`. SSH host keys are generated on the console at first boot.
+login works and root login does not. Keep the console on a trusted LAN and
+change the password after the first boot with `passwd`. SSH host keys are
+generated on the console at first boot.
 
 ## Not included
 

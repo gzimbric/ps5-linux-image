@@ -153,6 +153,18 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 
 ## CachyOS 7.3 for 11.60
 
+> **Public tester prerelease; the exact CI image is still unbooted.**
+> [Download image 2](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2)
+> only for a retail PS5 on firmware 11.60, use the recommended bounded Wi-Fi
+> ELF from the [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21),
+> and follow the [image-2 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md).
+> Run 21 booted an earlier local image, not this CI artifact. Flashing erases
+> the entire selected drive, so verify the target first. Keep the console on a
+> trusted LAN until changing the default `steam` / `steam` password, fully
+> power off between attempts instead of using Rest Mode, never redistribute
+> the console-dumped `pcieuartiw620_combo_v1.bin`, and redact reports before
+> posting them.
+
 The current test candidate is **image 2**, tag
 `cachyos1160-k73-image-2`, which resolves to source commit
 `346088a48f66eb956dafdec9de5085e73b2d44a5` and packages
@@ -161,14 +173,15 @@ it did **not** boot image 1 or image 2. Image 1 is superseded by image 2, and
 image 2 remains unbooted until it passes a fresh console run.
 
 [Workflow run 39481460775](https://github.com/gzimbric/ps5-linux-image/actions/runs/39481460775)
-completed successfully and created a private draft release. The draft has one
-image archive, `ps5-cachyos1160-k73.img.xz`, at 1,943,471,712 bytes with
-SHA-256
+completed successfully and created the
+[public tester prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2).
+It has one image archive, `ps5-cachyos1160-k73.img.xz`, at 1,943,471,712
+bytes with SHA-256
 `8b785243f79a32a4155cc1e39bed01d580e25ca514e88abbfed1a8a8157a281a`.
 It decompresses to the 12,582,912,000-byte raw image with SHA-256
 `3798c7dba96412c5301eb201d8bf8aa4edd1b2f80a743dfd7b90b2a79222c62d`.
-Those are verified build and release facts, not a hardware result; the release
-stays draft until this exact image boots on a console.
+Those are verified build and release facts, not a hardware result. Publishing
+the prerelease for testing does not change the exact image's unbooted status.
 
 The profile starts with the official CachyOS image and replaces its kernel
 with mainline v7.3 plus the exact PS5 patch set published by rmux (Armandas
@@ -198,18 +211,26 @@ a pacman hook. Steam's **Switch to Desktop** action and joining Wi-Fi from
 the KDE network menu both failed in Run 21 and are not fixed by image 2;
 manual session switching and `nmcli` remain the recorded workarounds. VCN
 initialized and displayed a picture in Run 21, but video decode was not
-tested.
+tested. Image 2 enables `ps5fan.service` at boot; it requests the tested
+maximum fan servo pattern (`3`) as a fixed bring-up setting, not a dynamic fan
+curve. The CPU and GPU frequency drivers are separate and remain unloaded at
+boot and manual-only. Follow the [tester guide's opt-in procedure](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md)
+only after the baseline test: try one driver per boot, monitor it, and fully
+power off afterward.
 
 The boot files are not the exact sizes the earlier 11.60 loaders require, so
-the image needs a bounded 11.60 loader from
-[gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader)
-`main`: `make linux-1160-dma-e820-bounded-wifi` for Wi-Fi, or
-`make linux-1160-dma-e820-bounded`. The exact bounded Wi-Fi artifact that
-booted Run 21 was built at historical commit `98925a2`; current loader
-`main` reproduces its hash and adds build safeguards. The bounded build
-without the Wi-Fi dump remains unbooted. There is no published prebuilt
-bounded-loader release, and the similarly named
-`linux-1160-dma-e820-wifi` is not the bounded build. On Linux x86_64:
+the image needs the
+[bounded 11.60 loader tester prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
+Use `ps5-linux-loader-1160-dma-e820-bounded-wifi.elf` for the first test; its
+SHA-256 is
+`e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f`.
+That bounded Wi-Fi artifact booted Run 21 with the earlier local image and
+copies the console's own IW620 firmware to the USB. It does not contain that
+firmware. Never upload or redistribute the resulting
+`pcieuartiw620_combo_v1.bin`. The non-Wi-Fi bounded ELF is included for A/B
+testing but remains unbooted. The similarly named
+`linux-1160-dma-e820-wifi` is not the bounded build. Current loader `main`
+reproduces the prerelease hashes and adds build safeguards. On Linux x86_64:
 
 ```bash
 ./scripts/build-linux-ps5-k73.sh
