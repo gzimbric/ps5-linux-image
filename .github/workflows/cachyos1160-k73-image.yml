@@ -15,7 +15,9 @@ run-name: CachyOS 7.3 11.60 image (${{ github.ref_name }})
 # Nothing is public until the draft is reviewed and published by hand. The
 # image is one .img.xz, never split; if it comes out at 2 GiB or more the job
 # fails before the release step. Release assets are used rather than workflow
-# artifacts because artifacts need a GitHub login and expire.
+# artifacts because artifacts need a GitHub login and expire. If creating the
+# draft fails, the release files are kept as a workflow artifact for 7 days,
+# so the draft can be made by hand without building again.
 
 on:
   workflow_dispatch:
@@ -369,6 +371,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Create draft release
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -438,3 +441,38 @@ jobs:
             --notes-file release-notes.md \
             ps5-cachyos1160-k73.img.xz SHA256SUMS build-info.txt cachyos1160-k73-root-changes.txt)
           echo "Draft release: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The image only exists on this runner. If the draft could not be made,
+      # keep what it would have held, so it can be made by hand.
+      - name: Keep the release files
+        if: failure() && steps.release.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: cachyos1160-k73-release-files
+          path: |
+            dist/ps5-cachyos1160-k73.img.xz
+            dist/SHA256SUMS
+            dist/build-info.txt
+            dist/cachyos1160-k73-root-changes.txt
+            dist/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Say how to finish the release
+        if: failure() && steps.release.outcome == 'failure'
+        env:
+          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag || format('cachyos1160-k73-build-{0}', github.run_number) }}
+        run: |
+          {
+            echo "Creating the draft release failed. The release files are in the"
+            echo "cachyos1160-k73-release-files artifact for 7 days. To finish it:"
+            echo
+            echo '```'
+            echo "gh run download $GITHUB_RUN_ID -R $GITHUB_REPOSITORY -n cachyos1160-k73-release-files -D release-files"
+            echo "cd release-files && sha256sum -c --ignore-missing SHA256SUMS"
+            echo "gh release create $TAG -R $GITHUB_REPOSITORY --draft --target $GITHUB_SHA \\"
+            echo "  --title 'CachyOS 7.3.0 for PS5 firmware 11.60 ($TAG)' --notes-file release-notes.md \\"
+            echo "  ps5-cachyos1160-k73.img.xz SHA256SUMS build-info.txt cachyos1160-k73-root-changes.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
