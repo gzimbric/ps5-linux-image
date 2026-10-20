@@ -1,0 +1,18 @@
+# Refuse to install or upgrade linux-ps5 when /boot/efi cannot be updated
+# (CachyOS 7.3 image for PS5 firmware 11.60). 95-ps5-boot-files.hook copies
+# the new bzImage and initrd.img to /boot/efi after the transaction. If the
+# boot partition is not mounted read-write by then, the console boots the old
+# kernel against the new kernel's modules, which can leave it without
+# Ethernet or SSH. This check runs first, so pacman stops before it changes
+# anything. Mount the boot partition and run pacman again.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = linux-ps5
+
+[Action]
+Description = Checking that the PS5 boot files on /boot/efi can be updated...
+When = PreTransaction
+Exec = /usr/local/sbin/ps5-update-boot-files --precheck
+AbortOnFail

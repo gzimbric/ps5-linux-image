@@ -208,10 +208,12 @@ ok "fan, display re-detect, Wi-Fi firmware, Bluetooth, SSH, boot report and grow
 # ------------------------------------------------------- kernel hold, hook
 
 grep -qx 'IgnorePkg   = linux-ps5' "$R/etc/pacman.conf" || die "linux-ps5 is not held with IgnorePkg"
+same "$R/etc/pacman.d/hooks/05-ps5-boot-files-precheck.hook" \
+  "$PROFILE/files/05-ps5-boot-files-precheck.hook" "pacman hook 05-ps5-boot-files-precheck.hook"
 same "$R/etc/pacman.d/hooks/95-ps5-boot-files.hook" "$PROFILE/files/95-ps5-boot-files.hook" \
   "pacman hook 95-ps5-boot-files.hook"
 [[ ! -e $R/etc/pacman.d/hooks/00-ps5-linux-ps5-guard.hook ]] || die "the 7.1.7 guard hook is installed"
-ok "linux-ps5 held, boot-file hook installed"
+ok "linux-ps5 held, boot-file hooks installed"
 
 # ------------------------------------------------------- account and keys
 

@@ -216,12 +216,34 @@ What is different:
   [`ps5-update-boot-files`](files/ps5-update-boot-files) after a transaction
   that installs `linux-ps5`, `mkinitcpio` or `mkinitcpio-busybox`, or changes
   firmware, initcpio hooks, DKMS modules or systemd (the triggers mkinitcpio
-  uses for its own images). It rebuilds `/boot/initrd.img-<version>`, runs
-  the bounded loader check, and only then replaces `bzImage` and
-  `initrd.img` on `/boot/efi`. If the check fails, the old files stay. Run
-  `sudo ps5-update-boot-files` by hand after editing `/etc/mkinitcpio.conf`
-  or `/etc/modprobe.d`. This replaces cachyos1160's guard hook, which refused
-  any kernel change because its loader needed exact sizes.
+  uses for its own images), so an ordinary `pacman -Syu` can run it too. It
+  builds a new initramfs and checks it the way the image build does
+  (`amdgpu.ko` for the kernel, the eight Cyan Skillfish 2 firmware files and
+  `ps5-amdgpu.conf`, and none of `mlan`, `moal`, the frequency drivers or
+  IW620 firmware), runs the bounded loader check on it and the kernel, and
+  only then replaces `bzImage` and `initrd.img` on `/boot/efi` and
+  `/boot/initrd.img-<version>`. If a check fails, nothing is replaced. The
+  pair that was on `/boot/efi` is kept as `bzImage.prev` and
+  `initrd.img.prev`. Run `sudo ps5-update-boot-files` by hand after editing
+  `/etc/mkinitcpio.conf` or `/etc/modprobe.d`.
+
+  A second hook,
+  [`05-ps5-boot-files-precheck.hook`](files/05-ps5-boot-files-precheck.hook),
+  runs before any transaction that installs or upgrades `linux-ps5` and
+  makes pacman refuse it unless `/boot/efi` is mounted read-write with
+  `cmdline.txt` on it. Otherwise pacman would replace the modules in
+  `/usr/lib/modules` while the boot partition kept the old kernel, and the
+  console could come up without Ethernet or SSH. These replace cachyos1160's
+  guard hook, which refused any kernel change because its loader needed exact
+  sizes.
+
+  If the console stops booting after an update, put the USB drive in another
+  computer, open the FAT partition (label `boot`), and rename
+  `bzImage.prev` and `initrd.img.prev` to `bzImage` and `initrd.img`. That
+  fully undoes an initramfs update (systemd, firmware, mkinitcpio). After a
+  `linux-ps5` change it brings back the old kernel, but the root filesystem
+  only has the new kernel's modules, so reinstall the old package with
+  `pacman -U` as soon as the console is up.
 
 ## Login
 

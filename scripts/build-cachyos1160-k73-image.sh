@@ -164,7 +164,7 @@ for f in README.md cmdline.txt root-changes.expected config/ps5-amdgpu.conf \
   files/ps5-iw620.conf files/ps5-iw620-firmware files/ps5-iw620-firmware.service \
   files/ps5-bt-quiet files/ps5-bt-quiet.service \
   files/ps5-1160-check-boot-files files/ps5-update-boot-files \
-  files/95-ps5-boot-files.hook; do
+  files/05-ps5-boot-files-precheck.hook files/95-ps5-boot-files.hook; do
   [[ -f $PROFILE/$f ]] || die "profile file missing: distros/cachyos1160-k73/$f"
 done
 expect_file "$PROFILE/cmdline.txt" "${FAT_SIZE[cmdline.txt]}" \
@@ -525,12 +525,15 @@ log "Ethernet"
 add_file 0644 "$PROFILE/files/ps5-ethernet.conf" etc/modules-load.d/ps5-ethernet.conf
 
 log "Kernel hold and boot-file updates"
-# IgnorePkg keeps pacman -Syu away from linux-ps5. The hook rebuilds the
+# IgnorePkg keeps pacman -Syu away from linux-ps5. The 95 hook rebuilds the
 # initramfs and updates /boot/efi after a kernel or initramfs change, once the
-# files pass the bounded loader's checks.
+# files pass the bounded loader's checks. The 05 hook stops a linux-ps5
+# change before it starts when /boot/efi is not mounted read-write.
 add_file 0755 "$CHECK" usr/local/sbin/ps5-1160-check-boot-files
 add_file 0755 "$PROFILE/files/ps5-update-boot-files" usr/local/sbin/ps5-update-boot-files
 add_dir etc/pacman.d/hooks
+add_file 0644 "$PROFILE/files/05-ps5-boot-files-precheck.hook" \
+  etc/pacman.d/hooks/05-ps5-boot-files-precheck.hook
 add_file 0644 "$PROFILE/files/95-ps5-boot-files.hook" etc/pacman.d/hooks/95-ps5-boot-files.hook
 [[ $(grep -c '^#IgnorePkg   =$' "$R/etc/pacman.conf") == 1 ]] ||
   die "IgnorePkg anchor not found once in /etc/pacman.conf"
@@ -556,7 +559,7 @@ log "FAT boot partition"
 # Mount the FAT partition where the console mounts it and let the image's
 # own ps5-update-boot-files write bzImage and initrd.img, as the pacman hook
 # will after a kernel update. cmdline.txt goes on first, since the update
-# checks it too.
+# checks it too. The base image's 7.1.7 files are not kept as .prev copies.
 mount_at "$R/boot/efi" -t vfat -o rw "$P2_DEV"
 listing=$(cd -- "$R/boot/efi" && find . -mindepth 1 -printf '%P\n' | sort)
 [[ $listing == "$(printf '%s\n' "${FAT_FILES[@]}" | sort)" ]] ||
@@ -564,7 +567,7 @@ listing=$(cd -- "$R/boot/efi" && find . -mindepth 1 -printf '%P\n' | sort)
 expect_sha "$R/boot/efi/bzImage" "$OLD_FAT_BZIMAGE_SHA256" "FAT bzImage before changes"
 cp -- "$PROFILE/cmdline.txt" "$R/boot/efi/cmdline.txt.new"
 mv -f -- "$R/boot/efi/cmdline.txt.new" "$R/boot/efi/cmdline.txt"
-in_root /usr/local/sbin/ps5-update-boot-files --no-mkinitcpio
+in_root /usr/local/sbin/ps5-update-boot-files --no-mkinitcpio --no-backup
 sync
 
 # pacman -Qkk lists the package files that changed since installation. Only
