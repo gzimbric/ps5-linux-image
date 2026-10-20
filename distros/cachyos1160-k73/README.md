@@ -70,6 +70,10 @@ fetches each source at a pinned commit:
 | ps5-linux/ps5-linux-mwifiex | `4aff9085530a3cdf7d5fbb124c006cc299ac3605` |
 | nxp-imx/mwifiex | `a5fe4e194bf99315e349d81d77d6dfacec70757a` |
 
+`--patches-repo URL` fetches the patch set from a mirror instead; it still
+has to have commit `36f173f`, and the files are still checked by SHA-256.
+The CI workflow takes the same URL as its `patches_repo` input.
+
 It builds in the same Debian kernel-builder image and package snapshot as
 the Ubuntu 24.04 kernel (`x86_64-linux-gnu-gcc (Debian 14.2.0-19) 14.2.0`),
 with a fixed build user, host and timestamp. The kernel step

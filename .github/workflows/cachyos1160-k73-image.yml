@@ -30,6 +30,10 @@ on:
         description: 'Download the official ps5-cachyos.img.xz from this URL instead of the upstream default. It must still match the pinned SHA-256.'
         type: string
         default: ''
+      patches_repo:
+        description: 'Fetch the 7.3 patch set from this git URL (a mirror) instead of rmuxnet/ps5-linux-patches-1. It must still have the pinned commit, and the files are still checked by SHA-256.'
+        type: string
+        default: ''
   push:
     tags:
       - 'cachyos1160-k73-image-*'
@@ -91,7 +95,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends libarchive-tools zstd
 
       - name: Build kernel and Wi-Fi modules
-        run: ./scripts/build-linux-ps5-k73.sh --out "$KERNEL_DIR"
+        env:
+          PATCHES_REPO_INPUT: ${{ inputs.patches_repo }}
+        run: |
+          set -euo pipefail
+          patches_args=()
+          if [ -n "${PATCHES_REPO_INPUT:-}" ]; then
+            patches_args=(--patches-repo "$PATCHES_REPO_INPUT")
+          fi
+          ./scripts/build-linux-ps5-k73.sh --out "$KERNEL_DIR" "${patches_args[@]}"
 
       - name: Package linux-ps5
         run: sudo ./scripts/package-linux-ps5-k73.sh --kernel-dir "$KERNEL_DIR"

@@ -41,7 +41,7 @@ REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 usage() {
   cat <<EOF
 Usage: $0 [--out DIR] [--work DIR] [--platform linux/amd64|linux/arm64]
-          [--linux-repo URL] [--jobs N] [--keep-volume]
+          [--linux-repo URL] [--patches-repo URL] [--jobs N] [--keep-volume]
 
   --out DIR        output directory (default: linux-bin/cachyos1160-k73). It
                    has to be on a case-sensitive filesystem: the kernel
@@ -53,6 +53,12 @@ Usage: $0 [--out DIR] [--work DIR] [--platform linux/amd64|linux/arm64]
   --linux-repo URL fetch v7.3 from this repository instead of $LINUX_REPO
                    (for example a local clone); the tag must still point at
                    $LINUX_COMMIT
+  --patches-repo URL
+                   fetch the 7.3 patch set from this repository instead of
+                   $PATCHES_REPO
+                   (for example a mirror); it must still have commit
+                   $PATCHES_COMMIT, and linux.patch,
+                   .config and ps5_vcn.bin are still checked by SHA-256
   --jobs N         parallel build jobs (default: all CPUs in the container)
   --keep-volume    keep the Docker volume with the built kernel tree
 EOF
@@ -72,6 +78,7 @@ while (($#)); do
     --work) (($# >= 2)) || die "--work needs a directory"; work=$2; shift 2 ;;
     --platform) (($# >= 2)) || die "--platform needs a value"; platform=$2; shift 2 ;;
     --linux-repo) (($# >= 2)) || die "--linux-repo needs a URL"; LINUX_REPO=$2; shift 2 ;;
+    --patches-repo) (($# >= 2)) || die "--patches-repo needs a URL"; PATCHES_REPO=$2; shift 2 ;;
     --jobs) (($# >= 2)) || die "--jobs needs a number"; jobs=$2; shift 2 ;;
     --keep-volume) keep_volume=1; shift ;;
     -h|--help) usage; exit 0 ;;
