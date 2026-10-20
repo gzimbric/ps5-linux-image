@@ -2,21 +2,21 @@
 # Builds the NXP IW620 Wi-Fi modules (mlan.ko, moal.ko) for the Linux 7.3.0
 # kernel that docker/kernel-builder/build-k73.sh just built.
 #
-# Same driver as Run 17: nxp-imx/mwifiex a5fe4e1 with the four
-# ps5-linux-mwifiex 4aff908 patches, plus ps5-iw620-kernel73-compat.patch from
-# this repository for the 7.3 cfg80211 and string changes. It runs in the
-# ps5-kernel-builder image with no network, the built kernel tree at /src
-# (so the module CRCs come from this kernel's Module.symvers), the two driver
-# repositories at /in (read-only), this repository at /repo (read-only) and
-# the kernel output directory at /out. The modules go to /out/ps5-iw620. No
-# firmware is involved here.
+# The same driver as the 7.1.7 Ubuntu Wi-Fi build: nxp-imx/mwifiex a5fe4e1
+# with the four ps5-linux-mwifiex 4aff908 patches, plus
+# ps5-iw620-kernel73-compat.patch from this repository for the 7.3 cfg80211
+# and string changes. It runs in the ps5-kernel-builder image with no
+# network, the built kernel tree at /src (so the module CRCs come from this
+# kernel's Module.symvers), the two driver repositories at /in (read-only),
+# this repository at /repo (read-only) and the kernel output directory at
+# /out. The modules go to /out/ps5-iw620. No firmware is involved here.
 set -euo pipefail
 
 KVER=7.3.0
 PS5_MWIFIEX_COMMIT=4aff9085530a3cdf7d5fbb124c006cc299ac3605
 NXP_MWIFIEX_COMMIT=a5fe4e194bf99315e349d81d77d6dfacec70757a
 COMPAT=/repo/distros/cachyos1160-k73/kernel/ps5-iw620-kernel73-compat.patch
-COMPAT_SHA256=d98a7d8c1d93f6eec172d739db0dd0819406097f7e999257cb0adf0a6296e197
+COMPAT_SHA256=899b4b1cd83bf6b85074d3aff311bbc104723e118a327aa65f7326546c789304
 ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
 
 die() { echo "ERROR: $*" >&2; exit 1; }

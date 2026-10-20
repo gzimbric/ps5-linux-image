@@ -105,8 +105,8 @@ with a fixed build user, host and timestamp. The kernel step
 The Wi-Fi step
 ([`docker/kernel-builder/build-iw620-k73.sh`](../../docker/kernel-builder/build-iw620-k73.sh))
 runs with no network in `/build/nxp`, against the kernel tree in `/src`, with
-objtool on. It applies the four patches the Run 17 driver used (each checked
-by SHA-256) and
+objtool on. It applies the four ps5-linux/ps5-linux-mwifiex `4aff908`
+patches the 7.1.7 Ubuntu Wi-Fi build also used (each checked by SHA-256) and
 [`kernel/ps5-iw620-kernel73-compat.patch`](kernel/ps5-iw620-kernel73-compat.patch),
 which adapts the driver to three changes in Linux 7.3; its header explains
 them. The build stops on any compiler, objtool or modpost warning, and checks
@@ -173,6 +173,17 @@ The fork's last commit turns the Salina xHCI PHY setup back on for Bluetooth
 and notes that this breaks kexec. That does not matter for a cold boot from
 the loader, but `kexec.sh` is not expected to work with this kernel.
 
+## If the display does not come up
+
+The kernel now enables amdgpu's VCN video block, which has not run on this
+console yet. If VCN fails to start, amdgpu can fail to probe. Ethernet and
+SSH do not depend on it, so they should still come up: SSH in and save
+`sudo dmesg` and the boot report. To boot without VCN, find
+`detected ip block number N <vcn_v2_0_0>` in either one and add
+`amdgpu.ip_block_mask=` to the end of the line in `cmdline.txt`, set to
+0xffffffff with bit N cleared (for N = 6, `amdgpu.ip_block_mask=0xffffffbf`).
+amdgpu then skips that block. Do not add `nokaslr`.
+
 ## Root filesystem changes
 
 The full list is in [`root-changes.expected`](root-changes.expected). The
@@ -189,17 +200,20 @@ What is different:
   carried a modules-load entry and options for its own Wi-Fi build, the
   `ps5-stage-firmware` helper and `ps5-bt-quiet`; they go with it. The
   profile puts `ps5-bt-quiet` and its unit back unchanged, enabled as before.
-- **Wi-Fi.** `mlan.ko` and `moal.ko` in `updates/ps5-iw620`, the Run 17
-  options in `/etc/modprobe.d/ps5-iw620.conf`, and no blacklist. udev loads
-  `moal` through its PCI alias.
+- **Wi-Fi.** `mlan.ko` and `moal.ko` in `updates/ps5-iw620`, the module
+  options already used with the 7.1.7 Ubuntu Wi-Fi build in
+  `/etc/modprobe.d/ps5-iw620.conf`, and no blacklist. udev loads `moal`
+  through its PCI alias.
   [`ps5-iw620-firmware.service`](files/ps5-iw620-firmware.service) copies
   `/boot/efi/lib/nxp/pcieuartiw620_combo_v1.bin` to
   `/lib/firmware/nxp/` when it is there and exactly 498,108 bytes, and loads
   the driver again. Only the Wi-Fi loader build writes that file, from the
-  console's own firmware; the image ships no Wi-Fi firmware. Without it, or
-  on a console without the IW620 (PCI `1b4b:2b56`), the service does nothing
-  and Ethernet is unaffected. The firmware helper is the Ubuntu 24.04
-  profile's, unchanged.
+  console's own firmware; the image ships no Wi-Fi firmware. The copy in
+  `/lib/firmware/nxp/` stays, so after one boot with the Wi-Fi loader, Wi-Fi
+  also comes up with the other bounded build. With no firmware in either
+  place, or on a console without the IW620 (PCI `1b4b:2b56`), the service
+  does nothing and Ethernet is unaffected. The firmware helper is the Ubuntu
+  24.04 profile's, unchanged.
 - **Frequency drivers.** `ps5-cpufreq.ko` and `ps5-gpufreq.ko` are part of
   the kernel package but have no module alias and are in no modules-load
   file, so nothing loads them at boot. Load them by hand, one at a time:
@@ -210,7 +224,12 @@ What is different:
   ```
 
   They talk to the SMU directly. Keep `amdgpu dpm=0` while they are in use,
-  since amdgpu's own power management would use the same mailbox.
+  since amdgpu's own power management would use the same mailbox. They are
+  experimental: the SMU messages they send have not been sent on this console
+  yet. Unloading one does not put the clocks back (`ps5_cpufreq` only
+  unregisters itself), and whether a reboot does is untested, so turn the
+  console fully off, not into rest mode, to be sure it is back to the
+  defaults.
 - **Boot report.** [`ps5-boot-report`](files/ps5-boot-report) also records
   every hwmon sensor (k10temp and any GPU sensor), the cpufreq and devfreq
   state, the amdgpu clock files when they exist, whether the frequency drivers

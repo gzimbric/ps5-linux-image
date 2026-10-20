@@ -113,7 +113,7 @@ same "$B/initrd.img" "$R/boot/initrd.img-$KVER" "FAT initrd.img = /boot/initrd.i
 [[ ! -f $kernel_dir/kernel/bzImage ]] ||
   same "$B/bzImage" "$kernel_dir/kernel/bzImage" "FAT bzImage = the built kernel"
 "$CHECK" "$B/bzImage" "$B/initrd.img" "$B/cmdline.txt"
-# The kernel this image needs is 7.3.0, not the old Run 15 one.
+# The kernel this image needs is 7.3.0, not the base image's 7.1.7.
 version=$(strings "$B/bzImage" | awk -v k="$KVER (" 'index($0, k) == 1 && !n { print; n = 1 }')
 [[ -n $version ]] || die "FAT bzImage is not a $KVER kernel"
 ok "bzImage: $version"

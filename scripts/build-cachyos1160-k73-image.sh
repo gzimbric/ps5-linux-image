@@ -58,7 +58,8 @@ declare -A FAT_SHA256=(
   [vram.txt]=bc4642feb06a4cc6d10d5865e321efaad7ab3f3f1d5d025151b79978164310a0
   [kexec.sh]=0f26e09911a8a2bc9912d7c77fee6ac09ccd18a820086cb103be92de081b6c52
 )
-# The base image's FAT bzImage and initrd.img (Run 15), replaced here.
+# The base image's FAT bzImage (the 7.1.7 kernel, at the exact size the
+# earlier 11.60 loader builds require), replaced here.
 OLD_FAT_BZIMAGE_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee34e99cde
 
 # Files of the 7.1.7 package that the profile puts back unchanged: the
