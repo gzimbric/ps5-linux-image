@@ -8,9 +8,13 @@ run-name: CachyOS 11.60 image (${{ github.ref_name }})
 # xz-compressed image to a draft release. Nothing is public until the draft
 # is reviewed and published by hand.
 #
-# Release assets are capped at 2 GiB, so the .img.xz is split into numbered
-# parts. Release assets are used rather than workflow artifacts because
-# artifacts need a GitHub login to download and expire after 90 days at most.
+# Each release asset has to be under 2 GiB, and the image ships as a single
+# .img.xz, never split into parts. To keep it under the limit, the free blocks
+# of the ext4 root are zeroed before the checks and the image is compressed
+# with xz -9. If the .img.xz still comes out at 2 GiB or more, the job fails
+# and no release is created. Release assets are used rather than workflow
+# artifacts because artifacts need a GitHub login to download and expire after
+# 90 days at most.
 
 on:
   workflow_dispatch:
@@ -47,7 +51,7 @@ jobs:
       CHANGES: output/cachyos1160-root-changes.txt
       DIST: dist
       # Leave room for the base download, the raw image and the compressed
-      # parts.
+      # image.
       MIN_FREE_GB: 30
 
     steps:
@@ -89,7 +93,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             binutils curl dosfstools e2fsprogs gcc libc6-dev mount util-linux \
-            xz-utils zstd
+            xz-utils zerofree zstd
 
       - name: Build image
         env:
@@ -105,6 +109,50 @@ jobs:
           # The base download and manifests are no longer needed.
           sudo rm -rf work/cachyos1160
           df -h /
+
+      - name: Zero free blocks in the root filesystem
+        run: |
+          set -euo pipefail
+          # Unused ext4 blocks still hold old data from the base image, and xz
+          # has to compress that too. Zeroing them makes the .img.xz smaller,
+          # so it stays under 2 GiB as one file. The FAT boot partition is not
+          # touched.
+          loop=$(sudo losetup --find --show --partscan "$IMAGE")
+          trap 'sudo losetup -d "$loop"' EXIT
+          sudo udevadm settle
+
+          # Find the root by its filesystem type, not by partition number.
+          root=
+          for nr in $(sudo partx --noheadings --output NR "$loop"); do
+            part=${loop}p$nr
+            if [ ! -b "$part" ]; then
+              echo "::error::$part did not appear after losetup --partscan"
+              exit 1
+            fi
+            fstype=$(sudo blkid -p -o value -s TYPE "$part" || true)
+            echo "partition $nr: ${fstype:-no filesystem}"
+            if [ "$fstype" = ext4 ]; then
+              if [ -n "$root" ]; then
+                echo "::error::more than one ext4 partition in the image"
+                exit 1
+              fi
+              root=$part
+            fi
+          done
+          if [ -z "$root" ]; then
+            echo "::error::no ext4 partition in the image"
+            exit 1
+          fi
+          echo "Root filesystem: $root"
+
+          if ! sudo e2fsck -fn "$root"; then
+            echo "::error::the root filesystem is not clean, not zeroing it"
+            exit 1
+          fi
+          # zerofree -v prints a progress counter, dropped here, and then the
+          # zeroed/free/total block counts.
+          sudo zerofree -v "$root" 2>&1 | tr '\r' '\n' | grep -v '%$'
+          sudo e2fsck -fn "$root"
 
       - name: Check pinned boot files
         run: |
@@ -152,29 +200,32 @@ jobs:
           (cd "$boot" && sha256sum bzImage initrd.img cmdline.txt vram.txt kexec.sh) \
             > "$DIST/boot-files.sha256"
 
-      - name: Compress and split
+      - name: Compress
         run: |
           set -euo pipefail
+          # Each GitHub release file must be under 2 GiB. The image is not split.
+          limit=2147483648
           raw_sha=$(sha256sum "$IMAGE" | awk '{print $1}')
-          xz -T0 -6 -c "$IMAGE" \
-            | split --bytes=1900M --numeric-suffixes=1 --suffix-length=3 \
-                - "$DIST/ps5-cachyos1160.img.xz."
+          xz -T0 -9 -c "$IMAGE" > "$DIST/ps5-cachyos1160.img.xz"
           cp "$CHANGES" "$DIST/"
 
           cd "$DIST"
-          parts=(ps5-cachyos1160.img.xz.[0-9][0-9][0-9])
-          xz_sha=$(cat "${parts[@]}" | sha256sum | awk '{print $1}')
-          # The joined parts must decompress to the image that was checked.
-          roundtrip_sha=$(cat "${parts[@]}" | xz -T0 -dc | sha256sum | awk '{print $1}')
+          xz_size=$(stat -c %s ps5-cachyos1160.img.xz)
+          echo "ps5-cachyos1160.img.xz: $xz_size bytes (limit: under $limit)"
+          if [ "$xz_size" -ge "$limit" ]; then
+            echo "::error::ps5-cachyos1160.img.xz is $xz_size bytes, over GitHub's 2 GiB per-file limit (release files must be under $limit bytes). The image must be made smaller; it is not split, and no release was created."
+            exit 1
+          fi
+          # The upload must decompress to the image that was checked.
+          roundtrip_sha=$(xz -T0 -dc ps5-cachyos1160.img.xz | sha256sum | awk '{print $1}')
           if [ "$roundtrip_sha" != "$raw_sha" ]; then
-            echo "::error::decompressed parts do not match the raw image"
+            echo "::error::decompressed ps5-cachyos1160.img.xz does not match the raw image"
             exit 1
           fi
 
           {
             echo "$raw_sha  ps5-cachyos1160.img"
-            echo "$xz_sha  ps5-cachyos1160.img.xz"
-            sha256sum "${parts[@]}" cachyos1160-root-changes.txt
+            sha256sum ps5-cachyos1160.img.xz cachyos1160-root-changes.txt
           } > SHA256SUMS
           cat SHA256SUMS
           ls -l
@@ -235,9 +286,6 @@ jobs:
             exit 1
           fi
           cd "$DIST"
-          parts=(ps5-cachyos1160.img.xz.[0-9][0-9][0-9])
-          joined=$(printf '%s + ' "${parts[@]}")
-          joined=${joined% + }
 
           cat > release-notes.md <<EOF
           Test build of CachyOS for PS5 firmware 11.60, built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL).
@@ -254,16 +302,14 @@ jobs:
 
           ### Download and flash
 
-          Download the ${#parts[@]} \`ps5-cachyos1160.img.xz.NNN\` parts and \`SHA256SUMS\` into one folder, then on Linux:
+          Download \`ps5-cachyos1160.img.xz\` and \`SHA256SUMS\` into one folder, then on Linux:
 
           \`\`\`
-          sha256sum -c --ignore-missing SHA256SUMS
-          cat ps5-cachyos1160.img.xz.[0-9][0-9][0-9] > ps5-cachyos1160.img.xz
           sha256sum -c --ignore-missing SHA256SUMS
           xz -dc ps5-cachyos1160.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
           \`\`\`
 
-          On macOS use \`shasum -a 256 -c --ignore-missing SHA256SUMS\`. On Windows join the parts with \`copy /b $joined ps5-cachyos1160.img.xz\`. balenaEtcher and Raspberry Pi Imager can flash the joined \`.img.xz\` directly.
+          On macOS use \`shasum -a 256 -c --ignore-missing SHA256SUMS\`. balenaEtcher and Raspberry Pi Imager can flash the \`.img.xz\` directly.
 
           The image is 12,582,912,000 bytes and fits a 16 GB USB drive. The root partition grows to fill the drive on first boot.
 
@@ -283,5 +329,5 @@ jobs:
           url=$(gh release create "$TAG" --draft --target "$GITHUB_SHA" \
             --title "CachyOS for PS5 firmware 11.60 ($TAG)" \
             --notes-file release-notes.md \
-            "${parts[@]}" SHA256SUMS build-info.txt cachyos1160-root-changes.txt)
+            ps5-cachyos1160.img.xz SHA256SUMS build-info.txt cachyos1160-root-changes.txt)
           echo "Draft release: $url" | tee -a "$GITHUB_STEP_SUMMARY"
