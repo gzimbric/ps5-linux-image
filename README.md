@@ -132,7 +132,7 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 
 ## CachyOS 7.3 for 11.60
 
-The `cachyos1160-k73` profile is the same official CachyOS image on Linux 7.3.0. The kernel is mainline v7.3 with the 7.3 port of the PS5 patches by rmux (Armandas Kvietkus), [rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at `36f173f`, which also brings rmux's PS5 CPU and GPU frequency drivers. The image builds them as modules and does not load them at boot. It also ships the IW620 Wi-Fi driver built for this kernel (but no Wi-Fi firmware), holds the kernel package in pacman, and updates the boot files from a pacman hook. Its boot files are not the exact sizes the earlier 11.60 loaders require, so it needs a bounded 11.60 loader build from [gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader) `firmware-11.60-dma-e820` at `98925a2`: `make linux-1160-dma-e820-bounded-wifi` for Wi-Fi, or `make linux-1160-dma-e820-bounded`. That loader has no prebuilt release and has not been booted yet, and the similarly named `linux-1160-dma-e820-wifi` is not it. On Linux x86_64:
+The `cachyos1160-k73` profile is the same official CachyOS image on Linux 7.3.0. The kernel is mainline v7.3 with the 7.3 port of the PS5 patches by rmux (Armandas Kvietkus), [rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at `36f173f`, which also brings rmux's PS5 CPU and GPU frequency drivers. The image builds them as modules and does not load them at boot. It also ships the IW620 Wi-Fi driver built for this kernel (but no Wi-Fi firmware), holds the kernel package in pacman, and updates the boot files from a pacman hook. Its boot files are not the exact sizes the earlier 11.60 loaders require, so it needs a bounded 11.60 loader build from [gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader) `main`: `make linux-1160-dma-e820-bounded-wifi` for Wi-Fi, or `make linux-1160-dma-e820-bounded`. The bounded Wi-Fi artifact built at `98925a2` booted in Run 21; the bounded build without the Wi-Fi dump remains unbooted. There is not yet a published prebuilt release, and the similarly named `linux-1160-dma-e820-wifi` is not the bounded build. On Linux x86_64:
 
 ```bash
 ./scripts/build-linux-ps5-k73.sh
@@ -141,7 +141,7 @@ sudo ./scripts/build-cachyos1160-k73-image.sh
 sudo ./scripts/verify-cachyos1160-k73-image.sh --image output/ps5-cachyos1160-k73.img
 ```
 
-The [profile README](distros/cachyos1160-k73/README.md) lists the pins, the checks and every change. The [`CachyOS 7.3 11.60 image`](.github/workflows/cachyos1160-k73-image.yml) workflow runs these steps on GitHub-hosted runners and attaches one `ps5-cachyos1160-k73.img.xz` to a draft release. It runs when a tag matching `cachyos1160-k73-image-*` is pushed. Nothing built from this profile has been booted on hardware yet.
+The [profile README](distros/cachyos1160-k73/README.md) lists the pins, the checks and every change. The [`CachyOS 7.3 11.60 image`](.github/workflows/cachyos1160-k73-image.yml) workflow runs these steps on GitHub-hosted runners and attaches one `ps5-cachyos1160-k73.img.xz` to a draft release. It runs when a tag matching `cachyos1160-k73-image-*` is pushed. A local pre-release image from this profile booted in Run 21; the CI build and the Bluetooth and Wi-Fi ordering fixes in this revision still need a hardware boot.
 
 ## Prerequisites
 

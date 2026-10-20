@@ -18,7 +18,7 @@ shopt -s inherit_errexit
 export LC_ALL=C
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-1"
+NEW_PACKAGE="linux-ps5 7.3.0-2"
 IMAGE_SIZE=12582912000
 P1_START=1024000 P1_SECTORS=23549952
 P2_START=2048 P2_SECTORS=1021952
@@ -121,8 +121,8 @@ ok "bzImage: $version"
 # ------------------------------------------------------------------ kernel
 
 db=$(cd -- "$R/var/lib/pacman/local" && find . -mindepth 1 -maxdepth 1 -name 'linux-ps5-*' -printf '%P\n')
-[[ $db == linux-ps5-7.3.0-1 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
-[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-1 ]] ||
+[[ $db == linux-ps5-7.3.0-2 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
+[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-2 ]] ||
   die "pacman database does not say $NEW_PACKAGE"
 modules=$(cd -- "$R/usr/lib/modules" && find . -mindepth 1 -maxdepth 1 -printf '%P\n')
 [[ $modules == "$KVER" ]] || die "kernel module trees: ${modules//$'\n'/ }"
@@ -143,14 +143,14 @@ for module in mlan moal; do
 done
 grep -qxF "alias $IW620_ALIAS moal" "$m/modules.alias" || die "modules.alias has no IW620 entry"
 same "$R/etc/modprobe.d/ps5-iw620.conf" "$PROFILE/files/ps5-iw620.conf" "/etc/modprobe.d/ps5-iw620.conf"
-if grep -rqsE '^[[:space:]]*blacklist[[:space:]]+(moal|mlan)([[:space:]]|$)' \
-  "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d"; then
-  die "the IW620 driver is blacklisted"
-fi
+blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(moal|mlan)([[:space:]]|$)' \
+  "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d" || true)
+[[ $blocks == "$R/etc/modprobe.d/ps5-iw620.conf:blacklist moal" ]] ||
+  die "expected only 'blacklist moal' in ps5-iw620.conf, found: ${blocks:-nothing}"
 firmware=$(find "$R" "$B" -xdev -name 'pcieuartiw620*' -print)
 [[ -z $firmware ]] || die "IW620 firmware in the image: $firmware"
 same "$R/usr/local/sbin/ps5-iw620-firmware" "$PROFILE/files/ps5-iw620-firmware" "ps5-iw620-firmware"
-ok "IW620 driver installed and not blacklisted, no IW620 firmware anywhere"
+ok "IW620 driver installed, udev alias load blocked, no IW620 firmware anywhere"
 
 # ------------------------------------------------------- frequency drivers
 

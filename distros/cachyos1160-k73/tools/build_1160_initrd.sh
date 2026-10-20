@@ -6,7 +6,7 @@ set -euo pipefail
 # The CachyOS 11.60 recipe (distros/cachyos1160/tools/build_1160_initrd.sh,
 # from gzimbric/ps5-linux-porting tools/build_1160_initrd.sh, MIT, commit
 # f1e24e2) for the Linux 7.3.0 image. The steps are the same. Two things
-# differ: it is pinned to linux-ps5 7.3.0-1, and since the bounded 11.60
+# differ: it is pinned to linux-ps5 7.3.0-2, and since the bounded 11.60
 # loader takes an initramfs of any size up to its limits, the result is checked
 # by its contents instead of an exact size and hash. The Wi-Fi options file is
 # allowed in the initramfs (mkinitcpio's modconf hook copies every file in
@@ -23,7 +23,7 @@ expected_mkinitcpio_config=6329d81d796228ef0a2c3ee3b16be551f4403dcb129defbab91aa
 firmware_names=(ce me mec pfp rlc sdma sdma1)
 
 expected_packages=(
-  "linux-ps5 7.3.0-1"
+  "linux-ps5 7.3.0-2"
   "linux-firmware-amdgpu 20260810-2"
   "mkinitcpio 41.1-1"
   "mkinitcpio-busybox 1.36.1-1"

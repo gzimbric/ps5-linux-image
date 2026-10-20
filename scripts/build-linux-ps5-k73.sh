@@ -9,8 +9,9 @@
 # then turns the result into the linux-ps5 pacman package.
 #
 # The kernel patch set is the 7.3 port with the PS5 CPU and GPU frequency
-# drivers by rmux (Armandas Kvietkus), rmuxnet/ps5-linux-patches-1, used as
-# published at the pinned commit.
+# drivers by rmux (Armandas Kvietkus), rmuxnet/ps5-linux-patches-1, fetched at
+# the pinned commit. The builder then applies the repository's hash-pinned
+# IW620 Bluetooth quirk follow-up.
 #
 # Needs git and Docker. Runs on Linux or macOS; GitHub Actions uses an x86_64
 # runner and the linux/amd64 builder.

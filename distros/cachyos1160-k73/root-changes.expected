@@ -1,7 +1,7 @@
 # Every root filesystem (p1) change scripts/build-cachyos1160-k73-image.sh is
 # allowed to make to the official ps5-cachyos image, apart from the kernel
 # package swap. The build compares full before/after file manifests of the
-# root partition. Paths owned by linux-ps5 7.1.7-1 or 7.3.0-1 are the kernel
+# root partition. Paths owned by linux-ps5 7.1.7-1 or 7.3.0-2 are the kernel
 # swap, which pacman checks; every other difference must match this list
 # exactly.
 #
@@ -15,7 +15,7 @@ A etc/hostname f 0644 0 0 4 e2871a86682961361a3d9c165fc284f2b1a4345940a597c1d3ff
 M etc/hosts f 0644 0 0 133 1709dde27b0fd66472c71ffb4499307e20bee4f6cea47bc61f7a339b2dc67b5e
 A etc/localtime l 0777 0 0 - /usr/share/zoneinfo/UTC
 A etc/modprobe.d/ps5-amdgpu.conf f 0644 0 0 195 51dbae6f372fa1f5bceee2fd95403042bb6954d29b3f9db2a11c769dd41fc677
-A etc/modprobe.d/ps5-iw620.conf f 0644 0 0 249 db60676ec451c7da77af8bbb226e9db8c33ca0ee1a0113230dd0d2b84af09058
+A etc/modprobe.d/ps5-iw620.conf f 0644 0 0 534 60a82f639a3bd1d44e3f9e1405bf8f451039ae04db70df859fad5b6d556b65b1
 A etc/modules-load.d/ps5-ethernet.conf f 0644 0 0 4 2e77b7f98104022b212c2f5739f7cd221037444f417be9423c701f8d6e5b2d01
 M etc/pacman.conf f 0644 0 0 3019 9aa21b480b54adea829ee5b69f63ad421807a9d313fa0a52b23ad6135637c139
 A etc/pacman.d/hooks d 0755 0 0 - -
@@ -47,6 +47,6 @@ A usr/lib/modules/7.3.0/updates/ps5-iw620/moal.ko f 0644 0 0 @MOAL_SIZE@ @MOAL_S
 A usr/local/sbin/ps5-1160-check-boot-files f 0755 0 0 8748 73d5345e710ec61a9340c3490092812563e7ccf2721f3c91c860e3768adb85cf
 A usr/local/sbin/ps5-amdgpu-reprobe f 0755 0 0 797 6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
 A usr/local/sbin/ps5-boot-report f 0755 0 0 10549 3452d986cde6b056a4dd981d163a31182e6d5a751a8eb89078dacb2b4cccae90
-A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2036 dc5fa815b87d8d7219422bc0a48c82b7840916a8cbe9f7b6bdc88c1c256f4e80
+A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2032 b3a4333090cfb09f55bc6a8ad44810b0a66d50f6d369293e7ad4a09231d27bef
 A usr/local/sbin/ps5-update-boot-files f 0755 0 0 6333 a66af783ddcec491a60bfbb741eff035a1d00e6a0c5992a32ed074a4de0d3535
 A usr/local/sbin/ps5_fan_max f 0755 0 0 @PS5_FAN_MAX_SIZE@ @PS5_FAN_MAX_SHA256@

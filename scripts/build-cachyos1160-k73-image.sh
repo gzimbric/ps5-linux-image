@@ -42,8 +42,8 @@ ROOT_VMLINUZ_717_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee
 ROOT_INITRD_717_SHA256=ba6dd1d0e69149e6be60bfd655b4bfc8cac0eee546e1ba478f3bdd1240965a56
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-1"
-PACKAGE_FILE=linux-ps5-7.3.0-1-x86_64.pkg.tar.zst
+NEW_PACKAGE="linux-ps5 7.3.0-2"
+PACKAGE_FILE=linux-ps5-7.3.0-2-x86_64.pkg.tar.zst
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
 
 # The FAT partition holds these five files. bzImage and initrd.img come from
@@ -430,10 +430,10 @@ expect_sha "$R/boot/initrd.img-$OLD_KVER" "$ROOT_INITRD_717_SHA256" "/boot/initr
 rm -- "$R/boot/initrd.img-$OLD_KVER"
 
 log "IW620 Wi-Fi driver"
-# udev loads moal through its PCI alias. ps5-iw620-firmware.service copies
-# this console's firmware from lib/nxp/ on the FAT partition, which only the
-# Wi-Fi loader build writes, and loads the driver again once it is there.
-# The image ships no Wi-Fi firmware.
+# ps5-iw620.conf keeps udev from loading moal through its PCI alias.
+# ps5-iw620-firmware.service copies this console's firmware from lib/nxp/ on
+# the FAT partition, which only the Wi-Fi loader build writes, and then loads
+# the driver by name. The image ships no Wi-Fi firmware.
 updates=usr/lib/modules/$KVER/updates
 add_dir "$updates"
 add_dir "$updates/ps5-iw620"
@@ -461,15 +461,16 @@ for module in mlan moal; do
 done
 grep -qxF "alias $IW620_ALIAS moal" "$R/usr/lib/modules/$KVER/modules.alias" ||
   die "modules.alias has no IW620 entry"
-if grep -rqsE '^[[:space:]]*blacklist[[:space:]]+(moal|mlan)([[:space:]]|$)' \
-  "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d"; then
-  die "the IW620 driver is blacklisted"
-fi
+# Only the alias load of moal is blocked, and only by ps5-iw620.conf.
+blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(moal|mlan)([[:space:]]|$)' \
+  "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d" || true)
+[[ $blocks == "$R/etc/modprobe.d/ps5-iw620.conf:blacklist moal" ]] ||
+  die "expected only 'blacklist moal' in ps5-iw620.conf, found: ${blocks:-nothing}"
 # The 7.1.7 package's firmware stager and its sysinit link went with it.
 pullins=$(find "$R/etc/systemd/system" "$R/usr/lib/systemd/system" \
   -name 'ps5-stage-firmware*' -print)
 [[ -z $pullins ]] || die "ps5-stage-firmware is still installed: $pullins"
-echo "ok  mlan.ko and moal.ko in /$updates/ps5-iw620, not blacklisted"
+echo "ok  mlan.ko and moal.ko in /$updates/ps5-iw620, loaded by ps5-iw620-firmware, not by udev"
 
 log "Bluetooth helper"
 # ps5-bt-quiet came with the 7.1.7 package and is enabled in the base image.
@@ -580,8 +581,8 @@ altered=$(sed -nE 's#^(warning|error): linux-ps5: /([^ ]+) .*#\2#p' <<<"$qkk" | 
 unexpected=$(grep -vE "^usr/lib/modules/$KVER/modules\.[a-z.]+$" <<<"$altered" || true)
 [[ -z $unexpected ]] || die "linux-ps5 files changed after installation: ${unexpected//$'\n'/ }"
 echo "ok  pacman -Qkk linux-ps5: $(grep -c . <<<"$altered" || true) module index files rewritten by depmod"
-package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-1/files" > "$work/package-new.paths"
-echo "linux-ps5 7.3.0-1 owns $(wc -l < "$work/package-new.paths") paths"
+package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-2/files" > "$work/package-new.paths"
+echo "linux-ps5 7.3.0-2 owns $(wc -l < "$work/package-new.paths") paths"
 
 expect_sha "$R/etc/mkinitcpio.conf" "$MKINITCPIO_CONF_SHA256" "/etc/mkinitcpio.conf (unchanged)"
 umount_all
@@ -646,13 +647,14 @@ awk -F'\t' -v OFS='\t' '
 {
   cat "$work/package-old.paths" "$work/package-new.paths"
   echo var/lib/pacman/local/linux-ps5-7.1.7-1
-  echo var/lib/pacman/local/linux-ps5-7.3.0-1
+  echo var/lib/pacman/local/linux-ps5-7.3.0-2
 } | sort -u > "$work/package.paths"
 awk -v swap="$work/kernel-swap" -v rest="$work/profile-changes" '
   NR == FNR { owned[$0] = 1; next }
   {
     p = $2
-    if (p in owned || p ~ /^var\/lib\/pacman\/local\/linux-ps5-(7\.1\.7|7\.3\.0)-1\//)
+    if (p in owned ||
+        p ~ /^var\/lib\/pacman\/local\/linux-ps5-(7\.1\.7-1|7\.3\.0-2)\//)
       print > swap
     else
       print > rest

@@ -45,16 +45,15 @@ if [ ! -f "$dst" ]; then
     exit 0
 fi
 
-# udev loads moal through its PCI alias, usually before /boot/efi is mounted.
-# Without the firmware that probe fails and leaves the device unbound. Let
-# pending loads finish, then load the driver again if it is not running on
-# the current firmware.
-udevadm settle --timeout=30 || true
-if [ "$installed" = 0 ] && [ -e "$iw620/driver" ]; then
-    echo "moal is bound to ${iw620##*/}"
-    exit 0
-fi
+# /etc/modprobe.d/ps5-iw620.conf keeps udev from loading moal through its PCI
+# alias, so this is the first load, now that the firmware is in place. If moal
+# was loaded by hand, keep it when it is bound and the firmware did not change,
+# and load it again otherwise.
 if [ -d /sys/module/moal ]; then
+    if [ "$installed" = 0 ] && [ -e "$iw620/driver" ]; then
+        echo "moal is bound to ${iw620##*/}"
+        exit 0
+    fi
     modprobe -r moal
 fi
 modprobe moal

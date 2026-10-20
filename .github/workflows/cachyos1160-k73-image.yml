@@ -51,7 +51,7 @@ defaults:
 
 env:
   KERNEL_DIR: linux-bin/cachyos1160-k73
-  PACKAGE: linux-ps5-7.3.0-1-x86_64.pkg.tar.zst
+  PACKAGE: linux-ps5-7.3.0-2-x86_64.pkg.tar.zst
 
 jobs:
   kernel:
@@ -398,14 +398,14 @@ jobs:
           cd "$DIST"
 
           cat > release-notes.md <<EOF
-          Test build of CachyOS on Linux 7.3.0 for PS5 firmware 11.60, built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). It has not been booted on hardware yet.
+          Test build of CachyOS on Linux 7.3.0 for PS5 firmware 11.60, built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). A local pre-release image from this profile booted in Run 21; this CI-built image has not been booted on hardware yet.
 
           ### What's new
 
-          - Linux 7.3.0 replaces 7.1.7. The kernel is mainline v7.3 with rmux's 7.3 port of the PS5 patches ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`), built with GCC 14.2. amdgpu still runs with \`dpm=0 gpu_recovery=0 force_1080p=1\`.
-          - The PS5 CPU and GPU frequency drivers are included but not loaded at boot. They are experimental: the SMU messages they send have not been sent on this console yet. Load them one at a time and keep amdgpu's \`dpm=0\` (the image default): \`sudo modprobe ps5_gpufreq\`, check temperatures and clocks, then \`sudo modprobe ps5_cpufreq\`. Unloading a driver does not put the clocks back, and whether a reboot does is untested, so turn the console fully off (not rest mode) to be sure they are back to the defaults.
-          - The kernel now enables amdgpu's VCN video block. This is untested on the console; see "If there is no picture" below. Its firmware, \`ps5_vcn.bin\` from AMD, is built into the kernel; the licence is in \`/usr/share/licenses/linux-ps5/LICENSE.amdgpu\`.
-          - The onboard IW620 Wi-Fi driver is installed and no longer blacklisted, but the image has no Wi-Fi firmware. The Wi-Fi build of the loader writes this console's own firmware to \`lib/nxp/\` on the boot partition, and the image copies it to \`/lib/firmware/nxp/\` at boot. Once the Wi-Fi loader has run, the firmware stays installed and Wi-Fi keeps working with the other bounded build too. Until then, use Ethernet.
+          - Linux 7.3.0 replaces 7.1.7. The kernel is mainline v7.3 with rmux's 7.3 port of the PS5 patches ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`), plus a hash-pinned local follow-up for the IW620 Bluetooth quirk ordering, built with GCC 14.2. amdgpu still runs with \`dpm=0 gpu_recovery=0 force_1080p=1\`. The Bluetooth fix still needs a hardware test.
+          - The PS5 CPU and GPU frequency drivers are included but not loaded at boot. Both loaded manually in Run 21, and the GPU driver lowered the observed idle temperature from about 50 C to about 36 C. A brief game load peaked at 84 C and ended before thermal equilibrium, so the drivers remain manual and experimental. Keep amdgpu's \`dpm=0\` (the image default), load one at a time, and monitor temperatures and clocks. Fully power off instead of using rest mode before the next baseline test.
+          - The kernel enables amdgpu's VCN video block. The local Run 21 image brought up the display with VCN enabled, but this CI image remains unbooted; see "If there is no picture" below. Its firmware, \`ps5_vcn.bin\` from AMD, is built into the kernel; the licence is in \`/usr/share/licenses/linux-ps5/LICENSE.amdgpu\`.
+          - The onboard IW620 Wi-Fi driver is installed, but the image has no Wi-Fi firmware. The Wi-Fi build of the loader writes this console's own firmware to \`lib/nxp/\` on the boot partition. At boot the image copies it to \`/lib/firmware/nxp/\` and only then loads the driver by name; its PCI alias is blacklisted to prevent an earlier firmware-less probe. Once the Wi-Fi loader has run, the firmware stays installed and Wi-Fi keeps working with the other bounded build too. Until then, use Ethernet.
           - The boot report (\`ps5-boot-report.txt\` on the boot partition) also records temperatures, CPU and GPU clocks, and whether the frequency drivers are loaded. It replaces Wi-Fi network names with \`<wifi-name>\` and masks MAC addresses, but it still has the console's IP addresses, so read it before posting it.
           - pacman holds \`linux-ps5\` back from updates. After a kernel or initramfs change, which an ordinary \`pacman -Syu\` can also make, a pacman hook builds a new initramfs, checks it, and updates \`bzImage\` and \`initrd.img\` on the boot partition if they pass the loader's checks. The pair it replaces is kept there as \`bzImage.prev\` and \`initrd.img.prev\`. pacman refuses a kernel change while the boot partition is not mounted read-write.
 
@@ -418,7 +418,7 @@ jobs:
           - \`make linux-1160-dma-e820-bounded-wifi\` for Wi-Fi, ELF sha256 \`e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f\`
           - \`make linux-1160-dma-e820-bounded\` without Wi-Fi, ELF sha256 \`1c80b040c5a808b3f09418728424a875d5598fe6b2a5d68adeb4db5979a7541a\`
 
-          Neither has been booted on hardware yet. Every earlier 11.60 loader refuses this image, because \`bzImage\` and \`initrd.img\` are no longer the exact sizes those loaders accept. That includes the published DMA loader and \`linux-1160-dma-e820-wifi\`, which is not the bounded Wi-Fi build despite the similar name. Don't add \`nokaslr\`, \`mem=\` or \`memmap=\` to \`cmdline.txt\`; the bounded loader refuses them.
+          The bounded Wi-Fi build (sha256 \`e9fe6469...\`) booted Run 21 and supplied the console's Wi-Fi firmware. The non-Wi-Fi bounded build and this CI image remain unbooted. Every earlier 11.60 loader refuses this image, because \`bzImage\` and \`initrd.img\` are no longer the exact sizes those loaders accept. That includes the published DMA loader and \`linux-1160-dma-e820-wifi\`, which is not the bounded Wi-Fi build despite the similar name. Don't add \`nokaslr\`, \`mem=\` or \`memmap=\` to \`cmdline.txt\`; the bounded loader refuses them.
 
           ### Login
 
@@ -428,7 +428,7 @@ jobs:
 
           ### If there is no picture
 
-          VCN bring-up has not run on this console yet, and if it fails amdgpu can fail to start. Ethernet and SSH should still come up, since the root filesystem does not depend on amdgpu. SSH in and send the output of \`sudo dmesg\` along with \`ps5-boot-report.txt\` from the boot partition. To try a boot without VCN, find the line \`detected ip block number N <vcn_v2_0_0>\` in either of them and add \`amdgpu.ip_block_mask=\` to the end of the line in \`cmdline.txt\`, set to 0xffffffff with bit N cleared (for N = 6 that is \`amdgpu.ip_block_mask=0xffffffbf\`). Leave \`nokaslr\` out.
+          VCN initialized and the display came up in the local Run 21 image, but video decode was not tested and this CI-built image is still unbooted. If VCN fails, amdgpu can fail to start. Ethernet and SSH should still come up, since the root filesystem does not depend on amdgpu. SSH in and send the output of \`sudo dmesg\` along with \`ps5-boot-report.txt\` from the boot partition. To try a boot without VCN, find the line \`detected ip block number N <vcn_v2_0_0>\` in either of them and add \`amdgpu.ip_block_mask=\` to the end of the line in \`cmdline.txt\`, set to 0xffffffff with bit N cleared (for N = 6 that is \`amdgpu.ip_block_mask=0xffffffbf\`). Leave \`nokaslr\` out.
 
           ### Download and flash
 

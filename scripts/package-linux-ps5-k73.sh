@@ -17,7 +17,7 @@ umask 022
 
 KVER=7.3.0
 PKGNAME=linux-ps5
-PKGVER=${KVER}-1
+PKGVER=${KVER}-2
 # Commit time of the pinned patch set (36f173f).
 SOURCE_DATE_EPOCH=1792339253
 

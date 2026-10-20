@@ -1,0 +1,72 @@
+ps5-btusb-iw620-quirks.patch: make the PS5 IW620 Bluetooth quirks take effect on 7.3
+
+Apply after rmuxnet/ps5-linux-patches-1 linux.patch (36f173f).
+
+The IW620 (USB 1286:2059) reports the Bluetooth class in its device
+descriptor, so the generic USB_DEVICE_INFO(0xe0, 0x01, 0x01) entry at the
+top of btusb_table matches it first, with driver_info 0. The 7.3 port only
+lists the device in btusb_table, after the generic entries, and checks the
+interface-number flags before the quirks_table lookup, so none of the IW620
+flags apply.
+
+As in ps5-linux-patches #35, list the device in quirks_table too and defer
+both interface-number checks until after that lookup.
+
+diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
+index 21baba3..ca1b5fc 100644
+--- a/drivers/bluetooth/btusb.c
++++ b/drivers/bluetooth/btusb.c
+@@ -498,6 +498,17 @@ static const struct usb_device_id quirks_table[] = {
+ 	{ USB_DEVICE(0x1286, 0x2044), .driver_info = BTUSB_MARVELL },
+ 	{ USB_DEVICE(0x1286, 0x2046), .driver_info = BTUSB_MARVELL },
+ 	{ USB_DEVICE(0x1286, 0x204e), .driver_info = BTUSB_MARVELL },
++
++	/*
++	 * PS5 IW620. The device descriptor carries the Bluetooth class, so
++	 * the generic entry in btusb_table matches first and the flags only
++	 * take effect from here.
++	 */
++	{ USB_DEVICE(0x1286, 0x2059), .driver_info = BTUSB_MARVELL |
++						     BTUSB_IFNUM_0 |
++						     BTUSB_BROKEN_LE_DEFAULT_PHY |
++						     BTUSB_BROKEN_READ_LOCAL_NAME |
++						     BTUSB_NO_AUTOSUSPEND },
+ 
+ 	/*
+ 	 * NXP IW610 BT interfaces (Marvell-lineage silicon, same quirk as
+@@ -4208,15 +4219,6 @@ static int btusb_probe(struct usb_interface *intf,
+ 
+ 	BT_DBG("intf %p id %p", intf, id);
+ 
+-	if ((id->driver_info & BTUSB_IFNUM_2) &&
+-	    (intf->cur_altsetting->desc.bInterfaceNumber != 0) &&
+-	    (intf->cur_altsetting->desc.bInterfaceNumber != 2))
+-		return -ENODEV;
+-
+-	if ((id->driver_info & BTUSB_IFNUM_0) &&
+-		intf->cur_altsetting->desc.bInterfaceNumber != 0)
+-		return -ENODEV;
+-
+ 	ifnum_base = intf->cur_altsetting->desc.bInterfaceNumber;
+ 
+ 	if (!id->driver_info) {
+@@ -4228,6 +4230,19 @@ static int btusb_probe(struct usb_interface *intf,
+ 			id = match;
+ 	}
+ 
++	/*
++	 * Check these after quirks_table: class-matched devices arrive here
++	 * with driver_info 0 and acquire their interface restriction above.
++	 */
++	if ((id->driver_info & BTUSB_IFNUM_2) &&
++	    (intf->cur_altsetting->desc.bInterfaceNumber != 0) &&
++	    (intf->cur_altsetting->desc.bInterfaceNumber != 2))
++		return -ENODEV;
++
++	if ((id->driver_info & BTUSB_IFNUM_0) &&
++	    intf->cur_altsetting->desc.bInterfaceNumber != 0)
++		return -ENODEV;
++
+ 	if (id->driver_info & BTUSB_IGNORE)
+ 		return -ENODEV;
+ 

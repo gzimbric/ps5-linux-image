@@ -7,7 +7,10 @@ built for the new kernel, keeps the PS5 CPU and GPU frequency drivers
 available without loading them, and lets pacman keep the boot files up to
 date.
 
-Nothing built from this profile has been booted on hardware yet.
+A local pre-release image from this profile booted on hardware in Run 21.
+Display, Ethernet, loader-supplied IW620 Wi-Fi and the frequency drivers all
+worked in that run. The CI-built image from this revision is still unbooted;
+its Bluetooth and Wi-Fi load-order fixes need a fresh hardware run.
 
 The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
@@ -22,7 +25,9 @@ patches to Linux 7.3, plus rmux's CPU frequency (`ps5_cpufreq`) and GPU
 frequency (`ps5_gpufreq`) drivers. The build fetches the patch, its kernel
 config and the VCN firmware from that commit and checks each by SHA-256; none
 of it is copied into this repository, and the authorship in the patch and
-the drivers is unchanged.
+the drivers is unchanged. A local follow-up patch applies the IW620 Bluetooth
+quirk ordering used by ps5-linux patch-set PR #35; it is kept separate and
+hash-pinned in this repository.
 
 ## Loader
 
@@ -40,7 +45,10 @@ release of it yet, so build it from that commit:
 | `make linux-1160-dma-e820-bounded-wifi` (also writes this console's Wi-Fi firmware, see below) | `e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f` |
 | `make linux-1160-dma-e820-bounded` | `1c80b040c5a808b3f09418728424a875d5598fe6b2a5d68adeb4db5979a7541a` |
 
-Neither build has been booted on hardware yet.
+The bounded Wi-Fi build, with the `e9fe6469…` hash above, booted Run 21 and
+supplied the console's Wi-Fi firmware. The non-Wi-Fi bounded build has not
+been booted on hardware yet. The CI image produced from this revision is also
+unbooted.
 
 The bounded loader checks the files instead of their sizes:
 [`files/ps5-1160-check-boot-files`](files/ps5-1160-check-boot-files) runs
@@ -91,7 +99,9 @@ with a fixed build user, host and timestamp. The kernel step
 
 - checks `linux.patch` (`b8a238b9…`), the `.config` (`2294e750…`) and
   `firmware/amdgpu/ps5_vcn.bin` (404,544 bytes, `bbd15ab6…`) by SHA-256 and
-  applies the patch to v7.3;
+  applies the patch to v7.3, then checks and applies the local
+  [`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch)
+  (`54d7addb…`);
 - sets `X86_PS5_CPUFREQ=m` and `PS5_GPUFREQ=m` (the published config has them
   built in) and runs `make olddefconfig`. Every other difference from the
   published config is a toolchain line; the build log shows the diff;
@@ -113,7 +123,7 @@ them. The build stops on any compiler, objtool or modpost warning, and checks
 `.return_sites`, the vermagic and the IW620 PCI alias.
 
 [`scripts/package-linux-ps5-k73.sh`](../../scripts/package-linux-ps5-k73.sh)
-packages the kernel as `linux-ps5 7.3.0-1` for pacman, laid out like the
+packages the kernel as `linux-ps5 7.3.0-2` for pacman, laid out like the
 upstream package (kernel, modules, build headers, UAPI headers) plus AMD's
 licence for `ps5_vcn.bin` in `/usr/share/licenses/linux-ps5`. Its install
 script does nothing to `/boot/efi`; the pacman hook below does that.
@@ -124,7 +134,7 @@ script does nothing to `/boot/efi`; the pacman hook below does that.
 checks the base download, its partition table and both partition hashes,
 then in a chroot without network:
 
-1. replaces `linux-ps5 7.1.7-1` with `7.3.0-1` (`pacman -U`, install script
+1. replaces `linux-ps5 7.1.7-1` with `7.3.0-2` (`pacman -U`, install script
    skipped) and removes the old `/boot/initrd.img-7.1.7`;
 2. installs `mlan.ko` and `moal.ko` in `/usr/lib/modules/7.3.0/updates/ps5-iw620`
    and runs `depmod`;
@@ -175,9 +185,10 @@ the loader, but `kexec.sh` is not expected to work with this kernel.
 
 ## If the display does not come up
 
-The kernel now enables amdgpu's VCN video block, which has not run on this
-console yet. If VCN fails to start, amdgpu can fail to probe. Ethernet and
-SSH do not depend on it, so they should still come up: SSH in and save
+The local Run 21 image brought up the display with the VCN block enabled, but
+the CI-built image from this revision has not been booted yet. If VCN fails to
+start, amdgpu can fail to probe. Ethernet and SSH do not depend on it, so they
+should still come up: SSH in and save
 `sudo dmesg` and the boot report. To boot without VCN, find
 `detected ip block number N <vcn_v2_0_0>` in either one and add
 `amdgpu.ip_block_mask=` to the end of the line in `cmdline.txt`, set to
@@ -196,24 +207,32 @@ password login, and the `steam` account with autologin into Gaming Mode.
 
 What is different:
 
-- **Kernel.** `linux-ps5 7.3.0-1` replaces 7.1.7. The 7.1.7 package also
+- **Kernel.** `linux-ps5 7.3.0-2` replaces 7.1.7. The 7.1.7 package also
   carried a modules-load entry and options for its own Wi-Fi build, the
   `ps5-stage-firmware` helper and `ps5-bt-quiet`; they go with it. The
   profile puts `ps5-bt-quiet` and its unit back unchanged, enabled as before.
-- **Wi-Fi.** `mlan.ko` and `moal.ko` in `updates/ps5-iw620`, the module
+- **Wi-Fi.** `mlan.ko` and `moal.ko` in `updates/ps5-iw620`, and the module
   options already used with the 7.1.7 Ubuntu Wi-Fi build in
-  `/etc/modprobe.d/ps5-iw620.conf`, and no blacklist. udev loads `moal`
-  through its PCI alias.
+  `/etc/modprobe.d/ps5-iw620.conf`. That file also has `blacklist moal`, so
+  udev does not load `moal` through its PCI alias: it would do that before
+  `/boot/efi` is mounted, and without the firmware the probe fails.
   [`ps5-iw620-firmware.service`](files/ps5-iw620-firmware.service) copies
   `/boot/efi/lib/nxp/pcieuartiw620_combo_v1.bin` to
-  `/lib/firmware/nxp/` when it is there and exactly 498,108 bytes, and loads
-  the driver again. Only the Wi-Fi loader build writes that file, from the
-  console's own firmware; the image ships no Wi-Fi firmware. The copy in
-  `/lib/firmware/nxp/` stays, so after one boot with the Wi-Fi loader, Wi-Fi
-  also comes up with the other bounded build. With no firmware in either
-  place, or on a console without the IW620 (PCI `1b4b:2b56`), the service
-  does nothing and Ethernet is unaffected. The firmware helper is the Ubuntu
-  24.04 profile's, unchanged.
+  `/lib/firmware/nxp/` when it is there and exactly 498,108 bytes, then
+  loads `moal` by name, which the blacklist does not stop. Only the Wi-Fi
+  loader build writes that file, from the console's own firmware; the image
+  ships no Wi-Fi firmware. The copy in `/lib/firmware/nxp/` stays, so after
+  one boot with the Wi-Fi loader, Wi-Fi also comes up with the other bounded
+  build. With no firmware in either place, or on a console without the
+  IW620 (PCI `1b4b:2b56`), the service does nothing, `moal` is never loaded
+  and Ethernet is unaffected. The firmware helper started as the Ubuntu
+  24.04 profile's; here it loads the driver itself instead of reloading it
+  after udev.
+- **Bluetooth.** The kernel applies a local, hash-pinned follow-up after
+  rmux's patch set. It makes the IW620 quirks win over btusb's earlier generic
+  class match and defers both interface-number checks until after the quirk
+  lookup. This fixes the source-level cause found in Run 21, but the resulting
+  CI kernel has not yet been tested on the console.
 - **Frequency drivers.** `ps5-cpufreq.ko` and `ps5-gpufreq.ko` are part of
   the kernel package but have no module alias and are in no modules-load
   file, so nothing loads them at boot. Load them by hand, one at a time:
@@ -224,12 +243,14 @@ What is different:
   ```
 
   They talk to the SMU directly. Keep `amdgpu dpm=0` while they are in use,
-  since amdgpu's own power management would use the same mailbox. They are
-  experimental: the SMU messages they send have not been sent on this console
-  yet. Unloading one does not put the clocks back (`ps5_cpufreq` only
-  unregisters itself), and whether a reboot does is untested, so turn the
-  console fully off, not into rest mode, to be sure it is back to the
-  defaults.
+  since amdgpu's own power management would use the same mailbox. Both were
+  loaded manually in Run 21 and the GPU driver lowered the observed idle
+  temperature from about 50 C to about 36 C. During a brief game load the
+  reported temperature peaked at 84 C; the run ended before thermal
+  equilibrium, so that is not enough evidence to load either driver at boot.
+  They remain manual and experimental. Unloading one does not put the clocks
+  back (`ps5_cpufreq` only unregisters itself), so fully power off rather than
+  using rest mode before the next baseline test.
 - **Boot report.** [`ps5-boot-report`](files/ps5-boot-report) also records
   every hwmon sensor (k10temp and any GPU sensor), the cpufreq and devfreq
   state, the amdgpu clock files when they exist, whether the frequency drivers
