@@ -1,0 +1,194 @@
+ps5-iw620-kernel73-compat.patch: build the NXP IW620 Wi-Fi driver on Linux 7.3
+
+Applies to nxp-imx/mwifiex a5fe4e1 (lf-6.18.2_1.0.0) after the four patches
+from ps5-linux/ps5-linux-mwifiex 4aff908 that the Run 17 driver used, in this
+order: ps5-iw620.patch, ps5-iw620-cmd-timeout-recover.patch,
+ps5-iw620-kernel71-compat.patch, ps5-iw620-rtnl-bounded-wait.patch.
+Do not combine it with ps5-iw620-kernel72-compat.patch.
+
+Linux 7.3 changed three things the driver uses. Every change below sits
+behind a 7.3.0 version check, so older kernels build exactly as before.
+
+- cfg80211 now chooses the cookie for remain_on_channel and mgmt_tx and
+  passes it by value, and remain_on_channel gains an rx_addr argument. The
+  driver copies the value into a local variable and no longer makes up its
+  own random cookie, so the cookie it reports back is the one cfg80211
+  handed out.
+- struct cfg80211_ops no longer has probe_client, so
+  woal_cfg80211_probe_client and its assignment are compiled out.
+- strncpy() is gone from the kernel. moal_main.h maps strncpy to
+  woal_strncpy, which keeps strncpy's behaviour: copy at most count bytes,
+  stop at the first NUL and zero-fill the rest of the buffer.
+
+With this patch the driver builds against 7.3.0 with objtool on and no
+compiler, objtool or modpost warnings. It has not run on hardware yet.
+WPA3-SAE association sends its frames through mgmt_tx, so a WPA3 join is the
+first thing to check.
+
+diff --git a/mlinux/moal_cfg80211.c b/mlinux/moal_cfg80211.c
+index 8404ea0..3475c27 100644
+--- a/mlinux/moal_cfg80211.c
++++ b/mlinux/moal_cfg80211.c
+@@ -3423,7 +3423,11 @@ int woal_cfg80211_mgmt_tx(struct wiphy *wiphy,
+ 			  bool dont_wait_for_ack,
+ #endif
+ #endif
++#if CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++			  u64 tx_cookie)
++#else
+ 			  u64 *cookie)
++#endif
+ {
+ #if KERNEL_VERSION(3, 6, 0) <= CFG80211_VERSION_CODE
+ 	struct net_device *dev = wdev->netdev;
+@@ -3447,6 +3451,10 @@ int woal_cfg80211_mgmt_tx(struct wiphy *wiphy,
+ 	t_u8 category, action;
+ #endif
+ 	bool send_tx_expired = false;
++#if CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++	u64 tx_cookie_val = tx_cookie;
++	u64 *cookie = &tx_cookie_val;
++#endif
+ 
+ 	ENTER();
+ 
+@@ -3641,6 +3649,7 @@ int woal_cfg80211_mgmt_tx(struct wiphy *wiphy,
+ 	}
+ #endif
+ 
++#if !(CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0))
+ #if KERNEL_VERSION(3, 8, 0) > LINUX_VERSION_CODE
+ 	*cookie = random32() | 1;
+ #else
+@@ -3650,6 +3659,7 @@ int woal_cfg80211_mgmt_tx(struct wiphy *wiphy,
+ 	*cookie = get_random_u32() | 1;
+ #endif
+ #endif
++#endif
+ 
+ #if CFG80211_VERSION_CODE >= KERNEL_VERSION(5, 3, 0)
+ 	if (len > sizeof(moal_802_11_action_header) &&
+diff --git a/mlinux/moal_cfg80211.h b/mlinux/moal_cfg80211.h
+index a8a64c5..9065593 100644
+--- a/mlinux/moal_cfg80211.h
++++ b/mlinux/moal_cfg80211.h
+@@ -324,8 +324,12 @@ int woal_cfg80211_mgmt_tx(struct wiphy *wiphy,
+ 			  bool dont_wait_for_ack,
+ #endif
+ #endif
++#if CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++			  u64 tx_cookie);
++#else
+ 			  u64 *cookie);
+ #endif
++#endif
+ 
+ mlan_status woal_register_cfg80211(moal_private *priv);
+ 
+diff --git a/mlinux/moal_main.h b/mlinux/moal_main.h
+index 8153bf5..c2269e7 100644
+--- a/mlinux/moal_main.h
++++ b/mlinux/moal_main.h
+@@ -180,6 +180,20 @@ Change log:
+ #include <linux/pm_qos_params.h>
+ #endif
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++/* Linux 7.3 removed strncpy(). This keeps its semantics: copy at most
++ * count bytes, stop at the first NUL and zero-fill the rest. */
++static inline char *woal_strncpy(char *dest, const char *src, size_t count)
++{
++	size_t len = strnlen(src, count);
++
++	memcpy(dest, src, len);
++	memset(dest + len, 0, count - len);
++	return dest;
++}
++#define strncpy(dest, src, count) woal_strncpy(dest, src, count)
++#endif
++
+ #ifndef MIN
+ /** Find minimum */
+ #define MIN(a, b) ((a) < (b) ? (a) : (b))
+diff --git a/mlinux/moal_sta_cfg80211.c b/mlinux/moal_sta_cfg80211.c
+index 0d5942c..ed235ec 100644
+--- a/mlinux/moal_sta_cfg80211.c
++++ b/mlinux/moal_sta_cfg80211.c
+@@ -257,7 +257,12 @@ woal_cfg80211_remain_on_channel(struct wiphy *wiphy,
+ #if CFG80211_VERSION_CODE < KERNEL_VERSION(3, 8, 0)
+ 				enum nl80211_channel_type channel_type,
+ #endif
++#if CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++				unsigned int duration, u64 roc_cookie,
++				const u8 *rx_addr);
++#else
+ 				unsigned int duration, u64 *cookie);
++#endif
+ 
+ static int woal_cfg80211_cancel_remain_on_channel(struct wiphy *wiphy,
+ #if CFG80211_VERSION_CODE >= KERNEL_VERSION(3, 6, 0)
+@@ -7654,7 +7659,12 @@ woal_cfg80211_remain_on_channel(struct wiphy *wiphy, struct wireless_dev *wdev,
+ #if CFG80211_VERSION_CODE < KERNEL_VERSION(3, 8, 0)
+ 				enum nl80211_channel_type channel_type,
+ #endif
++#if CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++				unsigned int duration, u64 roc_cookie,
++				const u8 *rx_addr)
++#else
+ 				unsigned int duration, u64 *cookie)
++#endif
+ #else
+ /**
+  * @brief Make chip remain on channel
+@@ -7682,6 +7692,10 @@ woal_cfg80211_remain_on_channel(struct wiphy *wiphy, struct net_device *dev,
+ 	int ret = 0;
+ 	t_u8 status = 1;
+ 	moal_private *remain_priv = NULL;
++#if CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++	u64 roc_cookie_val = roc_cookie;
++	u64 *cookie = &roc_cookie_val;
++#endif
+ 
+ 	ENTER();
+ 
+@@ -7740,6 +7754,7 @@ woal_cfg80211_remain_on_channel(struct wiphy *wiphy, struct net_device *dev,
+ 
+ 	/* remain on channel operation success */
+ 	/* we need update the value cookie */
++#if !(CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0))
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 8, 0)
+ 	*cookie = (u64)random32() | 1;
+ #else
+@@ -7748,6 +7763,7 @@ woal_cfg80211_remain_on_channel(struct wiphy *wiphy, struct net_device *dev,
+ #else
+ 	*cookie = (u64)get_random_u32() | 1;
+ #endif
++#endif
+ #endif
+ 	priv->phandle->remain_on_channel = MTRUE;
+ 	priv->phandle->remain_bss_index = priv->bss_index;
+@@ -11189,6 +11205,7 @@ done:
+ 	return ret;
+ }
+ 
++#if !(CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0))
+ /**
+  *  @brief This function is probe client handle.
+  *
+@@ -11209,6 +11226,7 @@ static int woal_cfg80211_probe_client(struct wiphy *wiphy,
+ 	return -1;
+ }
+ #endif
++#endif
+ 
+ /**
+  *  @brief Sends deauth packet to kernel
+@@ -11842,7 +11860,7 @@ mlan_status woal_register_cfg80211(moal_private *priv)
+ 		woal_cfg80211_ops.assoc = woal_cfg80211_associate;
+ 		woal_cfg80211_ops.disconnect = NULL;
+ 		woal_cfg80211_ops.connect = NULL;
+-#ifdef UAP_SUPPORT
++#if defined(UAP_SUPPORT) && !(CFG80211_VERSION_CODE >= KERNEL_VERSION(7, 3, 0))
+ 		woal_cfg80211_ops.probe_client = woal_cfg80211_probe_client;
+ #endif
+ 	}

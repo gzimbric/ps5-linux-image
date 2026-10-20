@@ -1,0 +1,23 @@
+# pacman install script for linux-ps5 in the CachyOS 7.3 image for PS5
+# firmware 11.60. scripts/package-linux-ps5-k73.sh fills in the version.
+#
+# Unlike the upstream package, this one does not build an initramfs or copy
+# anything to /boot/efi itself. On the PS5 image the pacman hook
+# /etc/pacman.d/hooks/95-ps5-boot-files.hook does that at the end of the
+# transaction, after depmod, and only once both files pass the bounded 11.60
+# loader's checks.
+
+post_install() {
+    if [ -x /usr/local/sbin/ps5-update-boot-files ]; then
+        echo ">> /boot/efi is updated for __KVER__ at the end of this transaction."
+    else
+        echo ">> linux-ps5 __KVER__ is installed, but this system has no"
+        echo ">> ps5-update-boot-files. Build /boot/initrd.img-__KVER__ with"
+        echo ">> mkinitcpio and copy it and /boot/vmlinuz-__KVER__ to the boot"
+        echo ">> partition yourself."
+    fi
+}
+
+post_upgrade() {
+    post_install
+}
