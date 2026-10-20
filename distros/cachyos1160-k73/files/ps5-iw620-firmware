@@ -1,0 +1,66 @@
+#!/bin/sh
+# Install this console's IW620 Wi-Fi firmware from the boot partition, then
+# load the driver once the firmware is in place.
+#
+# The firmware 11.60 Wi-Fi loader build writes the console's own firmware to
+# lib/nxp/ on the FAT partition before Linux starts. The image ships no
+# firmware. Without that file, or on a console without the IW620, this does
+# nothing and Ethernet is unaffected.
+set -eu
+
+name=nxp/pcieuartiw620_combo_v1.bin
+src=/boot/efi/lib/$name
+dst=/lib/firmware/$name
+size=498108
+
+iw620=
+for dev in /sys/bus/pci/devices/*; do
+    [ "$(cat "$dev/vendor" 2>/dev/null)" = 0x1b4b ] || continue
+    [ "$(cat "$dev/device" 2>/dev/null)" = 0x2b56 ] || continue
+    iw620=$dev
+    break
+done
+if [ -z "$iw620" ]; then
+    echo "No IW620 Wi-Fi (PCI 1b4b:2b56) on this console"
+    exit 0
+fi
+
+installed=0
+if [ ! -f "$src" ]; then
+    echo "No $src (the loader did not write the Wi-Fi firmware)"
+elif [ "$(stat -c %s "$src")" != "$size" ]; then
+    echo "Ignoring $src: $(stat -c %s "$src") bytes, expected $size"
+elif cmp -s "$src" "$dst"; then
+    echo "Firmware already installed: $(sha256sum "$dst" | cut -d' ' -f1)"
+else
+    install -d -m 0755 "${dst%/*}"
+    install -m 0644 "$src" "$dst.new"
+    mv -f "$dst.new" "$dst"
+    installed=1
+    echo "Installed $dst from $src: $(sha256sum "$dst" | cut -d' ' -f1)"
+fi
+
+if [ ! -f "$dst" ]; then
+    echo "No IW620 firmware installed; Wi-Fi stays off"
+    exit 0
+fi
+
+# udev loads moal through its PCI alias, usually before /boot/efi is mounted.
+# Without the firmware that probe fails and leaves the device unbound. Let
+# pending loads finish, then load the driver again if it is not running on
+# the current firmware.
+udevadm settle --timeout=30 || true
+if [ "$installed" = 0 ] && [ -e "$iw620/driver" ]; then
+    echo "moal is bound to ${iw620##*/}"
+    exit 0
+fi
+if [ -d /sys/module/moal ]; then
+    modprobe -r moal
+fi
+modprobe moal
+if [ -e "$iw620/driver" ]; then
+    echo "moal is bound to ${iw620##*/}"
+else
+    echo "moal did not bind to ${iw620##*/}"
+    exit 1
+fi

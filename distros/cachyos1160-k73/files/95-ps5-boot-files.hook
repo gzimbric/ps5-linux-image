@@ -1,0 +1,28 @@
+# Keep bzImage and initrd.img on /boot/efi in step with the installed kernel
+# and initramfs (CachyOS 7.3 image for PS5 firmware 11.60). linux-ps5 is held
+# with IgnorePkg in /etc/pacman.conf, so it only changes when it is installed
+# on purpose, for example with pacman -U. The other triggers are the ones
+# mkinitcpio uses for its own images.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = linux-ps5
+Target = mkinitcpio
+Target = mkinitcpio-busybox
+
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = usr/lib/initcpio/*
+Target = usr/lib/firmware/*
+Target = usr/lib/modules/*/extramodules/
+Target = usr/src/*/dkms.conf
+Target = usr/lib/systemd/systemd
+
+[Action]
+Description = Updating the PS5 boot files on /boot/efi...
+When = PostTransaction
+Exec = /usr/local/sbin/ps5-update-boot-files

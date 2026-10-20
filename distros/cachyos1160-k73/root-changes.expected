@@ -1,0 +1,51 @@
+# Every root filesystem (p1) change scripts/build-cachyos1160-k73-image.sh is
+# allowed to make to the official ps5-cachyos image, apart from the kernel
+# package swap. The build compares full before/after file manifests of the
+# root partition. Paths owned by linux-ps5 7.1.7-1 or 7.3.0-1 are the kernel
+# swap, which pacman checks; every other difference must match this list
+# exactly.
+#
+# Columns: status path type mode uid gid size sha256-or-link-target
+# Status: A added, M modified (new values), R removed (old values).
+# The fan helper, the two Wi-Fi modules and the initramfs are built by the
+# same run, so their sizes and hashes are filled in from that build.
+A boot/initrd.img-7.3.0 f 0600 0 0 @INITRD_SIZE@ @INITRD_SHA256@
+R boot/initrd.img-7.1.7 f 0600 0 0 54367236 ba6dd1d0e69149e6be60bfd655b4bfc8cac0eee546e1ba478f3bdd1240965a56
+A etc/hostname f 0644 0 0 4 e2871a86682961361a3d9c165fc284f2b1a4345940a597c1d3ffb6695c578a24
+M etc/hosts f 0644 0 0 133 1709dde27b0fd66472c71ffb4499307e20bee4f6cea47bc61f7a339b2dc67b5e
+A etc/localtime l 0777 0 0 - /usr/share/zoneinfo/UTC
+A etc/modprobe.d/ps5-amdgpu.conf f 0644 0 0 195 51dbae6f372fa1f5bceee2fd95403042bb6954d29b3f9db2a11c769dd41fc677
+A etc/modprobe.d/ps5-iw620.conf f 0644 0 0 249 db60676ec451c7da77af8bbb226e9db8c33ca0ee1a0113230dd0d2b84af09058
+A etc/modules-load.d/ps5-ethernet.conf f 0644 0 0 4 2e77b7f98104022b212c2f5739f7cd221037444f417be9423c701f8d6e5b2d01
+M etc/pacman.conf f 0644 0 0 3019 9aa21b480b54adea829ee5b69f63ad421807a9d313fa0a52b23ad6135637c139
+A etc/pacman.d/hooks d 0755 0 0 - -
+A etc/pacman.d/hooks/95-ps5-boot-files.hook f 0644 0 0 854 118706039c4435455cbc59e25431ee8ab5e18a56abd6a41e99cafd2cb9b1a995
+A etc/ps5-first-boot-done f 0644 0 0 0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+A etc/systemd/system/multi-user.target.wants/ps5-amdgpu-reprobe.service l 0777 0 0 - /etc/systemd/system/ps5-amdgpu-reprobe.service
+A etc/systemd/system/multi-user.target.wants/ps5-iw620-firmware.service l 0777 0 0 - /etc/systemd/system/ps5-iw620-firmware.service
+A etc/systemd/system/multi-user.target.wants/ps5fan.service l 0777 0 0 - /etc/systemd/system/ps5fan.service
+A etc/systemd/system/ps5-amdgpu-reprobe.service f 0644 0 0 342 2409fd812118088098ce6b740acb913d872c1df1efdb38e6254d4d388cabe72e
+A etc/systemd/system/ps5-boot-report.service f 0644 0 0 313 c321910d5b8728f2547901eac70369d3332c442bc6299aa7fa8fb83258f88331
+A etc/systemd/system/ps5-boot-report.timer f 0644 0 0 171 9074e18c67eaec808a8934417573020249d2c3938b8688fb9ef3b36307c04fec
+A etc/systemd/system/ps5-iw620-firmware.service f 0644 0 0 308 8b17666574ea825f1ec6f9ee90410cd6ad35b5a7501a047e6947c28ccf1332d2
+A etc/systemd/system/ps5fan.service f 0644 0 0 326 19711fd4b0d001a0e4218e6051341b63cff6369420f5b999c4868d731c1d9404
+A etc/systemd/system/timers.target.wants d 0755 0 0 - -
+A etc/systemd/system/timers.target.wants/ps5-boot-report.timer l 0777 0 0 - /etc/systemd/system/ps5-boot-report.timer
+A usr/lib/firmware/amdgpu/cyan_skillfish2_ce.bin f 0644 0 0 263296 5946efbf7e46ccfe7e9f965da56c35b1187469d1c1a49c8a9eff433eb3ab4723
+A usr/lib/firmware/amdgpu/cyan_skillfish2_me.bin f 0644 0 0 263424 d4ed4d968de0d7720f7c8215d42fdae727bf99cdf43cee6f8f864dc2584b17e2
+A usr/lib/firmware/amdgpu/cyan_skillfish2_mec.bin f 0644 0 0 268592 b1c1f843a8faaa2de537d6ba05052a3776b5a1b73f8a3c3f5ed9d568489776a4
+A usr/lib/firmware/amdgpu/cyan_skillfish2_mec2.bin l 0777 0 0 - cyan_skillfish2_mec.bin
+A usr/lib/firmware/amdgpu/cyan_skillfish2_pfp.bin f 0644 0 0 263424 50e56dc1913571ff589425d2b059bddfc5e8a2b4bc22d3eb78cac75d1e0479a1
+A usr/lib/firmware/amdgpu/cyan_skillfish2_rlc.bin f 0644 0 0 25344 20acefdb6128a36275f4382425a109a7c9927f6053eab685bb51164ff1d18cfb
+A usr/lib/firmware/amdgpu/cyan_skillfish2_sdma.bin f 0644 0 0 33792 15d0d3626da7f2513f03b13bb7e02eeeeccab276276ae27d0b6067b5f25e9e95
+A usr/lib/firmware/amdgpu/cyan_skillfish2_sdma1.bin f 0644 0 0 33792 bd1c0b0f6a6a4f17ede034f2c844b6553fc444e08915c7bb500c09fde59d6255
+A usr/lib/modules/7.3.0/updates d 0755 0 0 - -
+A usr/lib/modules/7.3.0/updates/ps5-iw620 d 0755 0 0 - -
+A usr/lib/modules/7.3.0/updates/ps5-iw620/mlan.ko f 0644 0 0 @MLAN_SIZE@ @MLAN_SHA256@
+A usr/lib/modules/7.3.0/updates/ps5-iw620/moal.ko f 0644 0 0 @MOAL_SIZE@ @MOAL_SHA256@
+A usr/local/sbin/ps5-1160-check-boot-files f 0755 0 0 6890 6eafdc77607239ba92e9e834f7fbfd6553f4f6fcddf7b0cbbebba3ce38b709f0
+A usr/local/sbin/ps5-amdgpu-reprobe f 0755 0 0 797 6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
+A usr/local/sbin/ps5-boot-report f 0755 0 0 8572 213c6ed834ac40756bef6686fb7554cc1780ce3eee0acd2b31dd1df401492b71
+A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2036 dc5fa815b87d8d7219422bc0a48c82b7840916a8cbe9f7b6bdc88c1c256f4e80
+A usr/local/sbin/ps5-update-boot-files f 0755 0 0 2785 1a0ab566627e59bb82ca93a0065bdae5cd634d2fb4b1531f3adb19923f301dc9
+A usr/local/sbin/ps5_fan_max f 0755 0 0 @PS5_FAN_MAX_SIZE@ @PS5_FAN_MAX_SHA256@

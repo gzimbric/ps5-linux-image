@@ -1,0 +1,77 @@
+#!/bin/bash
+# Update bzImage and initrd.img on the PS5 boot partition (/boot/efi) for the
+# installed linux-ps5 kernel.
+#
+# The pacman hook /etc/pacman.d/hooks/95-ps5-boot-files.hook runs this after
+# a transaction that changes the kernel or what goes into the initramfs. Run
+# it by hand after editing /etc/mkinitcpio.conf or /etc/modprobe.d.
+#
+# It rebuilds /boot/initrd.img-<version> with mkinitcpio, checks the kernel
+# and initramfs against the bounded firmware 11.60 loader with
+# ps5-1160-check-boot-files, and only then replaces the files on /boot/efi.
+# If anything fails, the files on /boot/efi are left as they were.
+#
+# --no-mkinitcpio uses the existing /boot/initrd.img-<version> as it is.
+set -euo pipefail
+export LC_ALL=C
+
+efi=/boot/efi
+check=/usr/local/sbin/ps5-1160-check-boot-files
+rebuild=1
+
+die() {
+  echo "ps5-update-boot-files: $*" >&2
+  echo "ps5-update-boot-files: $efi was not changed" >&2
+  exit 1
+}
+
+case ${1:-} in
+  "") ;;
+  --no-mkinitcpio) rebuild=0 ;;
+  *) echo "Usage: $0 [--no-mkinitcpio]" >&2; exit 2 ;;
+esac
+((EUID == 0)) || die "run as root"
+
+# The kernel version comes from the installed linux-ps5 package. Reading the
+# local database directly keeps pacman out of its own hook.
+shopt -s nullglob
+dbs=(/var/lib/pacman/local/linux-ps5-[0-9]*/files)
+shopt -u nullglob
+((${#dbs[@]} == 1)) || die "expected one installed linux-ps5, found ${#dbs[@]}"
+kver=$(sed -n 's|^boot/vmlinuz-||p' "${dbs[0]}")
+[[ -n $kver && $kver != *$'\n'* ]] || die "cannot find the kernel in ${dbs[0]%/files}"
+kernel=/boot/vmlinuz-$kver
+initrd=/boot/initrd.img-$kver
+[[ -f $kernel ]] || die "$kernel is missing"
+[[ -d /usr/lib/modules/$kver ]] || die "/usr/lib/modules/$kver is missing"
+mountpoint -q "$efi" || die "$efi is not mounted"
+[[ -f $efi/cmdline.txt ]] || die "$efi/cmdline.txt is missing"
+
+if ((rebuild)); then
+  rm -f -- "$initrd.new"
+  mkinitcpio -k "$kver" -g "$initrd.new" || die "mkinitcpio failed"
+  mv -f -- "$initrd.new" "$initrd"
+fi
+[[ -f $initrd ]] || die "$initrd is missing"
+
+"$check" "$kernel" "$initrd" "$efi/cmdline.txt" ||
+  die "the bounded 11.60 loader would refuse these files"
+
+# Copy both files before renaming either, so a failed copy changes nothing.
+changed=()
+for pair in "$initrd:initrd.img" "$kernel:bzImage"; do
+  src=${pair%%:*} name=${pair##*:}
+  if cmp -s -- "$src" "$efi/$name"; then
+    echo "$efi/$name is up to date"
+    continue
+  fi
+  cp -- "$src" "$efi/$name.new" || die "could not write $efi/$name.new"
+  changed+=("$name")
+done
+sync -f "$efi"
+for name in "${changed[@]}"; do
+  mv -f -- "$efi/$name.new" "$efi/$name"
+  echo "Updated $efi/$name: $(stat -c %s "$efi/$name") bytes, sha256 $(sha256sum "$efi/$name" | cut -d' ' -f1)"
+done
+sync -f "$efi"
+echo "Boot files for $kver are on $efi. They need the bounded 11.60 loader."

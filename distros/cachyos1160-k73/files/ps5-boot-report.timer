@@ -1,0 +1,10 @@
+[Unit]
+Description=Capture PS5 boot diagnostics after startup settles
+
+[Timer]
+OnBootSec=35s
+AccuracySec=1s
+Unit=ps5-boot-report.service
+
+[Install]
+WantedBy=timers.target
