@@ -1,0 +1,440 @@
+name: CachyOS 7.3 11.60 image
+run-name: CachyOS 7.3 11.60 image (${{ github.ref_name }})
+
+# Builds the CachyOS image on Linux 7.3.0 for PS5 firmware 11.60 on
+# GitHub-hosted x86_64 runners, in two jobs:
+#
+#   kernel  Linux v7.3 with rmux's 7.3 port of the PS5 patches
+#           (rmuxnet/ps5-linux-patches-1, pinned), the IW620 Wi-Fi modules for
+#           that kernel, and the linux-ps5 pacman package.
+#   image   The official ps5-cachyos image with that kernel and the
+#           distros/cachyos1160-k73 profile, checked again read-only after the
+#           free blocks are zeroed, compressed to one .img.xz and attached to
+#           a draft release.
+#
+# Nothing is public until the draft is reviewed and published by hand. The
+# image is one .img.xz, never split; if it comes out at 2 GiB or more the job
+# fails before the release step. Release assets are used rather than workflow
+# artifacts because artifacts need a GitHub login and expire.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag for the draft release (created when the draft is published). Default: cachyos1160-k73-build-<run number>'
+        type: string
+        default: ''
+      base_url:
+        description: 'Download the official ps5-cachyos.img.xz from this URL instead of the upstream default. It must still match the pinned SHA-256.'
+        type: string
+        default: ''
+  push:
+    tags:
+      - 'cachyos1160-k73-image-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cachyos1160-k73-image
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  KERNEL_DIR: linux-bin/cachyos1160-k73
+  PACKAGE: linux-ps5-7.3.0-1-x86_64.pkg.tar.zst
+
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      # The kernel tree, the Docker builder and the staged modules and headers.
+      MIN_FREE_GB: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check disk space
+        run: |
+          set -euo pipefail
+          free_gb() { df -B1G --output=avail / | tail -n1 | tr -d ' '; }
+          df -h /
+          echo "CPUs: $(nproc)"; free -h
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "Removing preinstalled toolchains to make room"
+            sudo rm -rf \
+              /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+              /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
+              /usr/local/share/powershell /usr/local/share/chromium \
+              /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+            docker system prune --all --force >/dev/null
+            df -h /
+          fi
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "::error::only $(free_gb) GB free on /, need $MIN_FREE_GB GB"
+            exit 1
+          fi
+
+      - name: Install packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libarchive-tools zstd
+
+      - name: Build kernel and Wi-Fi modules
+        run: ./scripts/build-linux-ps5-k73.sh --out "$KERNEL_DIR"
+
+      - name: Package linux-ps5
+        run: sudo ./scripts/package-linux-ps5-k73.sh --kernel-dir "$KERNEL_DIR"
+
+      - name: Check kernel outputs
+        run: |
+          set -euo pipefail
+          ./distros/cachyos1160-k73/files/ps5-1160-check-boot-files "$KERNEL_DIR/kernel/bzImage"
+          (cd "$KERNEL_DIR" && sha256sum -c "$PACKAGE.sha256" && cd ps5-iw620 && sha256sum -c SHA256SUMS)
+          {
+            echo '```'
+            cat "$KERNEL_DIR/kernel/kernel-build-info.txt"
+            echo
+            echo "IW620 modules:"
+            cat "$KERNEL_DIR/ps5-iw620/SHA256SUMS"
+            echo
+            cat "$KERNEL_DIR/$PACKAGE.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload kernel
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-ps5-k73
+          path: |
+            ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}
+            ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}.sha256
+            ${{ env.KERNEL_DIR }}/kernel/
+            ${{ env.KERNEL_DIR }}/ps5-iw620/
+          if-no-files-found: error
+          retention-days: 30
+
+  image:
+    needs: kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      IMAGE: output/ps5-cachyos1160-k73.img
+      OUT: output
+      DIST: dist
+      # Leave room for the base download, the raw image and the compressed
+      # image.
+      MIN_FREE_GB: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          echo "Before cleanup:"
+          df -h / /mnt 2>/dev/null || df -h /
+          sudo rm -rf \
+            /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
+            /usr/local/share/powershell /usr/local/share/chromium \
+            /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+          docker system prune --all --force >/dev/null
+          echo "After cleanup:"
+          df -h / /mnt 2>/dev/null || df -h /
+          echo "CPUs: $(nproc)"; free -h
+          free_gb=$(df -B1G --output=avail / | tail -n1 | tr -d ' ')
+          if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
+            echo "::error::only ${free_gb} GB free on /, need ${MIN_FREE_GB} GB"
+            exit 1
+          fi
+
+      - name: Start disk sampler
+        run: |
+          # shellcheck disable=SC2016 # the inner bash expands these
+          nohup bash -c 'while true; do
+            echo "$(date -u +%H:%M:%S) $(df -B1M --output=avail / | tail -n1 | tr -d " ")"
+            sleep 20
+          done' > "$RUNNER_TEMP/disk-free-mb.log" 2>&1 &
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils curl dosfstools e2fsprogs gcc libc6-dev mount util-linux \
+            xz-utils zerofree zstd
+
+      - name: Download kernel
+        uses: actions/download-artifact@v6
+        with:
+          name: linux-ps5-k73
+          path: ${{ env.KERNEL_DIR }}
+
+      - name: Check kernel download
+        run: |
+          set -euo pipefail
+          cd "$KERNEL_DIR"
+          sha256sum -c "$PACKAGE.sha256"
+          (cd ps5-iw620 && sha256sum -c SHA256SUMS)
+          ls -lR
+
+      - name: Build image
+        env:
+          BASE_URL_INPUT: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          df -h /
+          base_args=()
+          if [ -n "${BASE_URL_INPUT:-}" ]; then
+            base_args=(--base-url "$BASE_URL_INPUT")
+          fi
+          sudo ./scripts/build-cachyos1160-k73-image.sh --kernel-dir "$KERNEL_DIR" \
+            "${base_args[@]}" --output "$IMAGE"
+          # The base download and manifests are no longer needed.
+          sudo rm -rf work/cachyos1160-k73
+          df -h /
+
+      - name: Zero free blocks in the root filesystem
+        run: |
+          set -euo pipefail
+          # Unused ext4 blocks still hold old data from the base image,
+          # including the replaced 7.1.7 kernel modules, and xz has to
+          # compress that too. Zeroing them makes the .img.xz smaller, so it
+          # stays under 2 GiB as one file. The FAT boot partition is not
+          # touched.
+          loop=$(sudo losetup --find --show --partscan "$IMAGE")
+          trap 'sudo losetup -d "$loop"' EXIT
+          sudo udevadm settle
+
+          # Find the root by its filesystem type, not by partition number.
+          root=
+          for nr in $(sudo partx --noheadings --output NR "$loop"); do
+            part=${loop}p$nr
+            if [ ! -b "$part" ]; then
+              echo "::error::$part did not appear after losetup --partscan"
+              exit 1
+            fi
+            fstype=$(sudo blkid -p -o value -s TYPE "$part" || true)
+            echo "partition $nr: ${fstype:-no filesystem}"
+            if [ "$fstype" = ext4 ]; then
+              if [ -n "$root" ]; then
+                echo "::error::more than one ext4 partition in the image"
+                exit 1
+              fi
+              root=$part
+            fi
+          done
+          if [ -z "$root" ]; then
+            echo "::error::no ext4 partition in the image"
+            exit 1
+          fi
+          echo "Root filesystem: $root"
+
+          if ! sudo e2fsck -fn "$root"; then
+            echo "::error::the root filesystem is not clean, not zeroing it"
+            exit 1
+          fi
+          # zerofree -v prints a progress counter, dropped here, and then the
+          # zeroed/free/total block counts.
+          sudo zerofree -v "$root" 2>&1 | tr '\r' '\n' | grep -v '%$'
+          sudo e2fsck -fn "$root"
+
+      - name: Verify image
+        run: sudo ./scripts/verify-cachyos1160-k73-image.sh --image "$IMAGE" --kernel-dir "$KERNEL_DIR"
+
+      - name: Record boot files
+        run: |
+          set -euo pipefail
+          # Partition 2 is the FAT boot partition.
+          read -r start sectors < <(
+            partx --noheadings --output START,SECTORS --nr 2 "$IMAGE")
+          boot=$(mktemp -d)
+          sudo mount -t vfat \
+            -o "ro,loop,offset=$((start * 512)),sizelimit=$((sectors * 512))" \
+            "$IMAGE" "$boot"
+          trap 'sudo umount "$boot"' EXIT
+          mkdir -p "$DIST"
+          (cd "$boot" && sha256sum bzImage initrd.img cmdline.txt vram.txt kexec.sh) \
+            > "$DIST/boot-files.sha256"
+          (cd "$boot" && stat -c '%-12n %10s bytes' bzImage initrd.img cmdline.txt vram.txt kexec.sh) \
+            > "$DIST/boot-files.sizes"
+          ./distros/cachyos1160-k73/files/ps5-1160-check-boot-files \
+            "$boot/bzImage" "$boot/initrd.img" "$boot/cmdline.txt" |
+            sed "s#$boot/##" > "$DIST/boot-files.check"
+          cat "$DIST/boot-files.sha256" "$DIST/boot-files.sizes" "$DIST/boot-files.check"
+
+      - name: Compress
+        run: |
+          set -euo pipefail
+          # Each GitHub release file must be under 2 GiB. The image is not split.
+          limit=2147483648
+          raw_sha=$(sha256sum "$IMAGE" | awk '{print $1}')
+          xz -T0 -9 -c "$IMAGE" > "$DIST/ps5-cachyos1160-k73.img.xz"
+          cp "$OUT/cachyos1160-k73-root-changes.txt" "$DIST/"
+
+          cd "$DIST"
+          xz_size=$(stat -c %s ps5-cachyos1160-k73.img.xz)
+          echo "ps5-cachyos1160-k73.img.xz: $xz_size bytes (limit: under $limit)"
+          if [ "$xz_size" -ge "$limit" ]; then
+            echo "::error::ps5-cachyos1160-k73.img.xz is $xz_size bytes, over GitHub's 2 GiB per-file limit (release files must be under $limit bytes). The image must be made smaller; it is not split, and no release was created."
+            exit 1
+          fi
+          # The upload must decompress to the image that was checked.
+          roundtrip_sha=$(xz -T0 -dc ps5-cachyos1160-k73.img.xz | sha256sum | awk '{print $1}')
+          if [ "$roundtrip_sha" != "$raw_sha" ]; then
+            echo "::error::decompressed ps5-cachyos1160-k73.img.xz does not match the raw image"
+            exit 1
+          fi
+
+          {
+            echo "$raw_sha  ps5-cachyos1160-k73.img"
+            sha256sum ps5-cachyos1160-k73.img.xz cachyos1160-k73-root-changes.txt
+          } > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+
+      - name: Write build info
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          base_xz_sha=$(sed -n 's/^BASE_XZ_SHA256=//p' scripts/build-cachyos1160-k73-image.sh)
+          changes=$OUT/cachyos1160-k73-root-changes.txt
+          fan=$(awk '$2 == "usr/local/sbin/ps5_fan_max" { print $7 " bytes, sha256 " $8 }' "$changes")
+          n_changes=$(grep -vc '^#' "$changes")
+          swap=$(sed -n '2s/^# //p' "$OUT/cachyos1160-k73-kernel-swap.txt")
+          min_free=$(awk '{print $2}' "$RUNNER_TEMP/disk-free-mb.log" | sort -n | head -n1)
+          {
+            echo "PS5 CachyOS 7.3.0 image, firmware 11.60"
+            echo
+            echo "Commit:      $GITHUB_SHA ($GITHUB_REF_NAME)"
+            echo "Build run:   $RUN_URL"
+            echo "Finished:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Base image:  ps5-cachyos.img.xz, sha256 $base_xz_sha"
+            echo "             (ps5-linux/ps5-linux-image release built 2026-08-29 from 52db0a4)"
+            echo "Raw image:   $(stat -c %s "$IMAGE") bytes"
+            echo "Fan helper:  ps5_fan_max, $fan (gcc $(gcc -dumpfullversion))"
+            echo "Root changes: $n_changes paths outside the kernel package, listed in cachyos1160-k73-root-changes.txt"
+            echo "Kernel swap: $swap"
+            echo "Lowest free disk on / during the build: ${min_free} MiB"
+            echo
+            cat "$KERNEL_DIR/kernel/kernel-build-info.txt"
+            echo
+            echo "Kernel package:"
+            cat "$KERNEL_DIR/$PACKAGE.sha256"
+            echo
+            echo "IW620 Wi-Fi modules (installed under /usr/lib/modules/7.3.0/updates/ps5-iw620):"
+            cat "$KERNEL_DIR/ps5-iw620/SHA256SUMS"
+            echo
+            echo "FAT boot partition files:"
+            cat "$DIST/boot-files.sha256"
+            cat "$DIST/boot-files.sizes"
+            echo
+            echo "Bounded 11.60 loader check:"
+            cat "$DIST/boot-files.check"
+            echo
+            echo "Release files:"
+            cat "$DIST/SHA256SUMS"
+          } > "$DIST/build-info.txt"
+          cat "$DIST/build-info.txt"
+          { echo '```'; cat "$DIST/build-info.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload checksums
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: cachyos1160-k73-checksums
+          path: |
+            dist/SHA256SUMS
+            dist/boot-files.sha256
+            dist/boot-files.check
+            dist/build-info.txt
+            output/cachyos1160-k73-root-changes.txt
+            output/cachyos1160-k73-kernel-swap.txt
+            output/cachyos1160-k73-boot-files.txt
+          if-no-files-found: ignore
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag || format('cachyos1160-k73-build-{0}', github.run_number) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::invalid release tag: $TAG"
+            exit 1
+          fi
+          cd "$DIST"
+
+          cat > release-notes.md <<EOF
+          Test build of CachyOS on Linux 7.3.0 for PS5 firmware 11.60, built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). It has not been booted on hardware yet.
+
+          ### What's new
+
+          - Linux 7.3.0 replaces 7.1.7. The kernel is mainline v7.3 with rmux's 7.3 port of the PS5 patches ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`), built with GCC 14.2. amdgpu still runs with \`dpm=0 gpu_recovery=0 force_1080p=1\`.
+          - The PS5 CPU and GPU frequency drivers are included but not loaded at boot. To try them, run \`sudo modprobe ps5_gpufreq\` and then \`sudo modprobe ps5_cpufreq\`. A reboot goes back to the defaults.
+          - amdgpu now brings up the VCN video block. Its firmware, \`ps5_vcn.bin\` from AMD, is built into the kernel; the licence is in \`/usr/share/licenses/linux-ps5/LICENSE.amdgpu\`.
+          - The onboard IW620 Wi-Fi driver is installed and no longer blacklisted, but the image has no Wi-Fi firmware. Wi-Fi only comes up with the Wi-Fi build of the loader, which writes this console's own firmware to \`lib/nxp/\` on the boot partition; the image installs it at boot. With any other loader, use Ethernet.
+          - The boot report (\`ps5-boot-report.txt\` on the boot partition) also records temperatures, CPU and GPU clocks, and whether the frequency drivers are loaded.
+          - pacman holds \`linux-ps5\` back from updates. After a kernel or initramfs change, a pacman hook rebuilds the initramfs and updates \`bzImage\` and \`initrd.img\` on the boot partition, if they pass the loader's checks.
+
+          Thanks to rmux (Armandas Kvietkus) for the 7.3 port and the frequency drivers.
+
+          ### Loader
+
+          This image needs the bounded 11.60 loader: \`linux-1160-dma-e820-bounded\`, or \`linux-1160-dma-e820-bounded-wifi\` for Wi-Fi. The published DMA loader refuses it, because \`bzImage\` and \`initrd.img\` are no longer the exact sizes that loader accepts. The loader is not part of this release. Don't add \`nokaslr\` to \`cmdline.txt\`; the bounded loader refuses it.
+
+          ### Login
+
+          Login is \`steam\` / \`steam\`, and SSH accepts that password. The \`steam\` account has passwordless sudo, and the first-boot setup screen is skipped, so nothing prompts you to change it. Run \`passwd\` after the first boot, and keep the console on a trusted network until you do.
+
+          The first boot can sit on a text console for a minute or two while Steam updates itself. Gaming Mode starts after that.
+
+          ### Download and flash
+
+          Download \`ps5-cachyos1160-k73.img.xz\` and \`SHA256SUMS\` into one folder, then on Linux:
+
+          \`\`\`
+          sha256sum -c --ignore-missing SHA256SUMS
+          xz -dc ps5-cachyos1160-k73.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+          \`\`\`
+
+          On macOS use \`shasum -a 256 -c --ignore-missing SHA256SUMS\`. balenaEtcher and Raspberry Pi Imager can flash the \`.img.xz\` directly.
+
+          The image is 12,582,912,000 bytes and fits a 16 GB USB drive. The root partition grows to fill the drive on first boot.
+
+          ### Checksums
+
+          \`\`\`
+          $(cat SHA256SUMS)
+          \`\`\`
+
+          FAT boot partition files:
+
+          \`\`\`
+          $(cat boot-files.sha256)
+          $(cat boot-files.sizes)
+          \`\`\`
+          EOF
+
+          url=$(gh release create "$TAG" --draft --target "$GITHUB_SHA" \
+            --title "CachyOS 7.3.0 for PS5 firmware 11.60 ($TAG)" \
+            --notes-file release-notes.md \
+            ps5-cachyos1160-k73.img.xz SHA256SUMS build-info.txt cachyos1160-k73-root-changes.txt)
+          echo "Draft release: $url" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -130,6 +130,19 @@ The output is `output/ps5-cachyos1160.img` (12,582,912,000 bytes) plus `output/c
 
 The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow runs the same script on a GitHub-hosted x86_64 runner, checks the five FAT boot files again, and attaches the compressed image to a draft release. It runs when a tag matching `cachyos1160-image-*` is pushed. It can also be started by hand from the Actions tab once the workflow is on the default branch.
 
+## CachyOS 7.3 for 11.60
+
+The `cachyos1160-k73` profile is the same official CachyOS image on Linux 7.3.0. The kernel is mainline v7.3 with the 7.3 port of the PS5 patches by rmux (Armandas Kvietkus), [rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at `36f173f`, which also brings rmux's PS5 CPU and GPU frequency drivers. The image builds them as modules and does not load them at boot. It also ships the IW620 Wi-Fi driver built for this kernel (but no Wi-Fi firmware), holds the kernel package in pacman, and updates the boot files from a pacman hook. Its boot files are not the exact sizes the earlier 11.60 loaders require, so it needs a bounded 11.60 loader build (`linux-1160-dma-e820-bounded`, or its Wi-Fi variant). On Linux x86_64:
+
+```bash
+./scripts/build-linux-ps5-k73.sh
+sudo ./scripts/package-linux-ps5-k73.sh
+sudo ./scripts/build-cachyos1160-k73-image.sh
+sudo ./scripts/verify-cachyos1160-k73-image.sh --image output/ps5-cachyos1160-k73.img
+```
+
+The [profile README](distros/cachyos1160-k73/README.md) lists the pins, the checks and every change. The [`CachyOS 7.3 11.60 image`](.github/workflows/cachyos1160-k73-image.yml) workflow runs these steps on GitHub-hosted runners and attaches one `ps5-cachyos1160-k73.img.xz` to a draft release. It runs when a tag matching `cachyos1160-k73-image-*` is pushed. Nothing built from this profile has been booted on hardware yet.
+
 ## Prerequisites
 
 - Docker with the Buildx plugin (and permission to run `--privileged` containers) — install as per your distro's instructions
