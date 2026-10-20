@@ -44,7 +44,7 @@ A usr/lib/modules/7.3.0/updates d 0755 0 0 - -
 A usr/lib/modules/7.3.0/updates/ps5-iw620 d 0755 0 0 - -
 A usr/lib/modules/7.3.0/updates/ps5-iw620/mlan.ko f 0644 0 0 @MLAN_SIZE@ @MLAN_SHA256@
 A usr/lib/modules/7.3.0/updates/ps5-iw620/moal.ko f 0644 0 0 @MOAL_SIZE@ @MOAL_SHA256@
-A usr/local/sbin/ps5-1160-check-boot-files f 0755 0 0 6890 6eafdc77607239ba92e9e834f7fbfd6553f4f6fcddf7b0cbbebba3ce38b709f0
+A usr/local/sbin/ps5-1160-check-boot-files f 0755 0 0 8748 73d5345e710ec61a9340c3490092812563e7ccf2721f3c91c860e3768adb85cf
 A usr/local/sbin/ps5-amdgpu-reprobe f 0755 0 0 797 6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
 A usr/local/sbin/ps5-boot-report f 0755 0 0 10549 3452d986cde6b056a4dd981d163a31182e6d5a751a8eb89078dacb2b4cccae90
 A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2036 dc5fa815b87d8d7219422bc0a48c82b7840916a8cbe9f7b6bdc88c1c256f4e80

@@ -1,12 +1,18 @@
 #!/bin/bash
 # Check PS5 boot files against the bounded firmware 11.60 loader.
 #
-# The bounded loader builds (make linux-1160-dma-e820-bounded, and its Wi-Fi
-# variant) accept any bzImage and initrd.img that pass the checks below,
-# instead of the exact Run 15 file sizes the earlier 11.60 builds require.
-# This is the same set of checks as the loader's include/boot_files_1160.h,
-# its file size limits and its nokaslr refusal, plus the 160 MiB limit on
-# bzImage and initrd.img together from loader_staging_1160.c.
+# The bounded loader builds (make linux-1160-dma-e820-bounded and
+# linux-1160-dma-e820-bounded-wifi in gzimbric/ps5-linux-loader, branch
+# firmware-11.60-dma-e820 at 98925a2) accept any bzImage and initrd.img that
+# pass the checks below, instead of the exact sizes the earlier 11.60 loader
+# builds require. These are that loader's checks: the setup header checks 1
+# to 14 of include/boot_files_1160.h (13 looks for the KASLR code, 14 for an
+# empty setup_data), its file size limits and initramfs formats, the 160 MiB
+# limit on bzImage and initrd.img together from loader_staging_1160.c, and
+# its cmdline.txt refusals (nokaslr, mem=, memmap= and any byte above 0x7f).
+# Its vram.txt check is not here, since the image's vram.txt is pinned. One
+# difference: the loader skips NUL padding in front of the initramfs, and
+# this script refuses it.
 #
 # Usage: ps5-1160-check-boot-files BZIMAGE [INITRD [CMDLINE]]
 #
@@ -22,6 +28,8 @@ MAX_COMBINED=$((160 * MIB))
 PAGE=16384                     # the loader's logical page (4 x 4 KiB)
 LOAD_PA=$((0x100000))          # the inner HV copies the payload here
 DECOMPRESS_LIMIT=$((0x3fffc000))
+# Only in the decompressor's kaslr.o, which is linked with CONFIG_RANDOMIZE_BASE.
+KASLR_MESSAGE='Physical KASLR disabled: no suitable memory region!'
 HEADER_END=$((0x26c))
 INITRD_MIN=512
 CMDLINE_MAX=2047
@@ -59,7 +67,7 @@ fi
 check_bzimage() {
   local boot_flag magic version setup_sects setup_size syssize payload
   local loadflags xloadflags relocatable alignment pref aligned_load base
-  local init_size end cmdline_size
+  local init_size end cmdline_size kaslr setup_data
 
   boot_flag=$(u "$bzimage" $((0x1fe)) 2)
   ((boot_flag == 0xaa55)) || { refuse "no 0xaa55 boot flag (check 2)"; return; }
@@ -107,7 +115,8 @@ check_bzimage() {
   pref=$(u "$bzimage" $((0x258)) 8)
   aligned_load=$(align_up "$LOAD_PA" "$alignment")
   base=$((aligned_load > pref ? aligned_load : pref))
-  if (((pref & (alignment - 1)) != 0 || LOAD_PA + payload > base)); then
+  if ((pref > DECOMPRESS_LIMIT || (pref & (alignment - 1)) != 0 ||
+       LOAD_PA + payload > base)); then
     refuse "payload of $payload bytes at 0x100000 reaches the decompression base $(printf '%#x' "$base") (check 10)"
     return
   fi
@@ -122,6 +131,19 @@ check_bzimage() {
   cmdline_size=$(u "$bzimage" $((0x238)) 4)
   ((cmdline_size >= CMDLINE_MAX)) ||
     { refuse "cmdline_size $cmdline_size, needs $CMDLINE_MAX (check 12)"; return; }
+
+  # Under the DMA reservation KASLR is what moves the kernel out of 16 MiB to
+  # 1 GiB. The header does not show it, so look for kaslr.o's message in the
+  # code the inner HV copies. grep -c reads to the end, so nothing upstream
+  # gets SIGPIPE.
+  kaslr=$(tail -c +$((setup_size + 1)) -- "$bzimage" | head -c "$payload" |
+    grep -caF -- "$KASLR_MESSAGE" || true)
+  ((kaslr > 0)) ||
+    { refuse "the kernel was built without KASLR (no \"$KASLR_MESSAGE\") (check 13)"; return; }
+
+  # The inner HV passes the header to Linux as it is.
+  setup_data=$(u "$bzimage" $((0x250)) 8)
+  ((setup_data == 0)) || { refuse "setup_data is not 0 (check 14)"; return; }
 
   printf '  protocol %#x, setup %d bytes, payload %d bytes at 0x100000 (ends %#x, %d bytes below %#x)\n' \
     "$version" "$setup_size" "$payload" $((LOAD_PA + payload)) \
@@ -142,7 +164,7 @@ if [[ -n $initrd ]]; then
   else
     head6=$(od -An -v -t x1 -N 6 -- "$initrd" | tr -d ' \n')
     case $head6 in
-      3037303730*) format="newc cpio" ;;
+      303730373031* | 303730373032*) format="newc cpio" ;;
       28b52ffd*) format=zstd ;;
       1f8b*) format=gzip ;;
       fd377a585a00) format=xz ;;
@@ -176,9 +198,20 @@ if [[ -n $cmdline ]]; then
   if ((cmdline_size > CMDLINE_MAX)); then
     refuse "cmdline.txt is $cmdline_size bytes; the loader reads $CMDLINE_MAX"
   fi
-  # KASLR is what moves the kernel out of the reserved 16 MiB to 1 GiB.
+  # KASLR is what moves the kernel out of the reserved 16 MiB to 1 GiB. A
+  # small mem= or more than four memmap= options keep it at 16 MiB too, and
+  # memmap= can turn the reservation back into RAM. An option counts at the
+  # start, after a space or control byte, or after a quote, as in the loader.
   if grep -q nokaslr -- "$cmdline"; then
     refuse "cmdline.txt contains nokaslr"
+  fi
+  if grep -qE '(^|[[:cntrl:] "])(mem|memmap)=' -- "$cmdline"; then
+    refuse "cmdline.txt has a mem= or memmap= option"
+  fi
+  # The kernel reads 0xa0 as a space, so an option after it would get past
+  # the check above.
+  if (($(tr -d '\000-\177' < "$cmdline" | wc -c) > 0)); then
+    refuse "cmdline.txt has a byte above 0x7f"
   fi
 fi
 

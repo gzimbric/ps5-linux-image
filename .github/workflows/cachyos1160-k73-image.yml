@@ -413,7 +413,12 @@ jobs:
 
           ### Loader
 
-          This image needs the bounded 11.60 loader: \`linux-1160-dma-e820-bounded\`, or \`linux-1160-dma-e820-bounded-wifi\` for Wi-Fi. The published DMA loader refuses it, because \`bzImage\` and \`initrd.img\` are no longer the exact sizes that loader accepts. The loader is not part of this release. Don't add \`nokaslr\` to \`cmdline.txt\`; the bounded loader refuses it.
+          This image needs the bounded 11.60 loader. It has no prebuilt release yet and is not part of this one, so build it from [gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader), branch \`firmware-11.60-dma-e820\` at commit \`98925a2\`:
+
+          - \`make linux-1160-dma-e820-bounded-wifi\` for Wi-Fi, ELF sha256 \`e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f\`
+          - \`make linux-1160-dma-e820-bounded\` without Wi-Fi, ELF sha256 \`1c80b040c5a808b3f09418728424a875d5598fe6b2a5d68adeb4db5979a7541a\`
+
+          Neither has been booted on hardware yet. Every earlier 11.60 loader refuses this image, because \`bzImage\` and \`initrd.img\` are no longer the exact sizes those loaders accept. That includes the published DMA loader and \`linux-1160-dma-e820-wifi\`, which is not the bounded Wi-Fi build despite the similar name. Don't add \`nokaslr\`, \`mem=\` or \`memmap=\` to \`cmdline.txt\`; the bounded loader refuses them.
 
           ### Login
 

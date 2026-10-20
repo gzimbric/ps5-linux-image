@@ -27,20 +27,30 @@ the drivers is unchanged.
 ## Loader
 
 The boot files are not the exact sizes the earlier 11.60 loader builds
-require, so those builds, including the published DMA E820 loader, refuse
-this image. Use a bounded build of the 11.60 loader:
+require, so every one of them refuses this image. That includes the
+published DMA E820 loader (`firmware-11.60-dma-e820-run18`) and the
+`linux-1160-dma-e820-wifi` target, whose name is close to the Wi-Fi one
+below. This image needs a bounded build of the 11.60 loader from
+[gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader),
+branch `firmware-11.60-dma-e820` at commit `98925a2`. There is no prebuilt
+release of it yet, so build it from that commit:
 
-- `make linux-1160-dma-e820-bounded`, or
-- `make linux-1160-dma-e820-bounded-wifi` for Wi-Fi (see below).
+| Target | ELF sha256 |
+|--------|------------|
+| `make linux-1160-dma-e820-bounded-wifi` (also writes this console's Wi-Fi firmware, see below) | `e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f` |
+| `make linux-1160-dma-e820-bounded` | `1c80b040c5a808b3f09418728424a875d5598fe6b2a5d68adeb4db5979a7541a` |
+
+Neither build has been booted on hardware yet.
 
 The bounded loader checks the files instead of their sizes:
 [`files/ps5-1160-check-boot-files`](files/ps5-1160-check-boot-files) runs
-the same checks, and the build runs it on every boot file it writes. In
-short, the compressed kernel copied to 0x100000 has to end below 16 MiB, the
-decompression window has to end by 0x3fffc000, `bzImage` and `initrd.img`
-together can take at most 160 MiB, and `cmdline.txt` must not contain
-`nokaslr`. Under the DMA reservation, KASLR is what moves the kernel out of
-16 MiB to 1 GiB, so the kernel config keeps `CONFIG_RANDOMIZE_BASE=y`.
+the same checks as that commit, and the build runs it on every boot file it
+writes. In short, the compressed kernel copied to 0x100000 has to end below
+16 MiB, the decompression window has to end by 0x3fffc000, the kernel has to
+be built with KASLR, `bzImage` and `initrd.img` together can take at most
+160 MiB, and `cmdline.txt` must not contain `nokaslr`, `mem=`, `memmap=` or
+any non-ASCII byte. Under the DMA reservation, KASLR is what moves the kernel
+out of 16 MiB to 1 GiB, so the kernel config keeps `CONFIG_RANDOMIZE_BASE=y`.
 
 ## Build
 

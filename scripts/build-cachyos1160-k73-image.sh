@@ -12,7 +12,8 @@
 #
 # The boot files are not the exact sizes the earlier 11.60 loaders require.
 # The image needs a bounded 11.60 loader build (linux-1160-dma-e820-bounded or
-# its Wi-Fi variant); the build checks the files against that loader's limits.
+# linux-1160-dma-e820-bounded-wifi, gzimbric/ps5-linux-loader 98925a2); the
+# build checks the files against that loader's limits.
 #
 # Run as root on Linux x86_64 (a GitHub ubuntu-24.04 runner, or a privileged
 # linux/amd64 container). Host tools: curl (only when downloading), xz,
