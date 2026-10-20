@@ -205,6 +205,7 @@ ok "ps5-cpufreq and ps5-gpufreq installed, absent from early-load paths, guarded
 # --------------------------------------------------------------- initramfs
 
 mount -t tmpfs tmpfs "$R/tmp"; MOUNTS+=("$R/tmp")
+mount -t tmpfs tmpfs "$R/run"; MOUNTS+=("$R/run")
 mount -t proc proc "$R/proc"; MOUNTS+=("$R/proc")
 mount --bind /dev "$R/dev"; MOUNTS+=("$R/dev")
 contents=$(unshare --net chroot "$R" /usr/bin/env -i PATH=/usr/bin LC_ALL=C \
