@@ -35,6 +35,23 @@ on:
         type: string
         default: ''
   push:
+    # Prime the exact kernel-bundle cache on the default branch whenever one
+    # of its inputs changes. The image job below is skipped for these pushes.
+    branches:
+      - main
+    paths:
+      - '.github/workflows/cachyos1160-k73-image.yml'
+      - '.dockerignore'
+      - 'scripts/build-linux-ps5-k73.sh'
+      - 'scripts/package-linux-ps5-k73.sh'
+      - 'docker/kernel-builder/Dockerfile'
+      - 'docker/kernel-builder/build.sh'
+      - 'docker/kernel-builder/build-k73.sh'
+      - 'docker/kernel-builder/build-iw620-k73.sh'
+      - 'docker/kernel-builder/package-deb.sh'
+      - 'docker/kernel-builder/repro-date'
+      - 'distros/cachyos1160-k73/kernel/**'
+      - 'distros/cachyos1160-k73/files/ps5-1160-check-boot-files'
     tags:
       - 'cachyos1160-k73-image-*'
 
@@ -67,6 +84,51 @@ jobs:
         with:
           persist-credentials: false
 
+      # Hash Git objects rather than workspace mtimes. A tree object covers
+      # every name, mode (including symlinks) and blob below that directory.
+      - name: Fingerprint exact kernel inputs
+        id: kernel-inputs
+        run: |
+          set -euo pipefail
+          inputs="$RUNNER_TEMP/kernel-inputs.txt"
+          : > "$inputs"
+          for input_path in \
+            .dockerignore \
+            scripts/build-linux-ps5-k73.sh \
+            scripts/package-linux-ps5-k73.sh \
+            docker/kernel-builder/Dockerfile \
+            docker/kernel-builder/build.sh \
+            docker/kernel-builder/build-k73.sh \
+            docker/kernel-builder/build-iw620-k73.sh \
+            docker/kernel-builder/package-deb.sh \
+            docker/kernel-builder/repro-date \
+            distros/cachyos1160-k73/kernel \
+            distros/cachyos1160-k73/files/ps5-1160-check-boot-files; do
+            printf '%s %s\n' "$input_path" "$(git rev-parse "HEAD:$input_path")" >> "$inputs"
+          done
+          cat "$inputs"
+          fingerprint=$(sha256sum "$inputs" | cut -d' ' -f1)
+          [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]]
+          echo "key=linux-ps5-k73-bundle-v1-${RUNNER_OS}-${RUNNER_ARCH}-${PACKAGE}-${fingerprint}" \
+            >> "$GITHUB_OUTPUT"
+
+      # This cache contains only the 70 MiB compressed handoff used by the
+      # image job, not the multi-gigabyte staging tree. There are deliberately
+      # no restore keys: a bundle made from any other input set is a miss.
+      # Main-branch runs prime the cache so later release-tag runs can restore
+      # it under GitHub's cache scoping rules.
+      - name: Restore exact kernel bundle
+        id: kernel-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}
+            ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}.sha256
+            ${{ env.KERNEL_DIR }}/kernel/
+            ${{ env.KERNEL_DIR }}/ps5-iw620/
+            ${{ env.KERNEL_DIR }}/kernel-cache-manifest.sha256
+          key: ${{ steps.kernel-inputs.outputs.key }}
+
       - name: Check disk space
         run: |
           set -euo pipefail
@@ -89,12 +151,14 @@ jobs:
           fi
 
       - name: Install packaging tools
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libarchive-tools zstd
 
       - name: Build kernel and Wi-Fi modules
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
         env:
           PATCHES_REPO_INPUT: ${{ inputs.patches_repo }}
         run: |
@@ -106,11 +170,40 @@ jobs:
           ./scripts/build-linux-ps5-k73.sh --out "$KERNEL_DIR" "${patches_args[@]}"
 
       - name: Package linux-ps5
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
         run: sudo ./scripts/package-linux-ps5-k73.sh --kernel-dir "$KERNEL_DIR"
+
+      - name: Record kernel bundle manifest
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          cd "$KERNEL_DIR"
+          unexpected=$(find "$PACKAGE" "$PACKAGE.sha256" kernel ps5-iw620 \
+            ! -type d ! -type f -print)
+          if [ -n "$unexpected" ]; then
+            echo "::error::kernel bundle has a symlink or special file"
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+          find "$PACKAGE" "$PACKAGE.sha256" kernel ps5-iw620 \
+            -type f -print0 | sort -z | xargs -0 sha256sum \
+            > kernel-cache-manifest.sha256
 
       - name: Check kernel outputs
         run: |
           set -euo pipefail
+          test -s "$KERNEL_DIR/kernel-cache-manifest.sha256"
+          (
+            cd "$KERNEL_DIR"
+            unexpected=$(find "$PACKAGE" "$PACKAGE.sha256" kernel ps5-iw620 \
+              kernel-cache-manifest.sha256 ! -type d ! -type f -print)
+            if [ -n "$unexpected" ]; then
+              echo "::error::kernel bundle has a symlink or special file"
+              printf '%s\n' "$unexpected"
+              exit 1
+            fi
+            sha256sum -c kernel-cache-manifest.sha256
+          )
           ./distros/cachyos1160-k73/files/ps5-1160-check-boot-files "$KERNEL_DIR/kernel/bzImage"
           (cd "$KERNEL_DIR" && sha256sum -c "$PACKAGE.sha256" && cd ps5-iw620 && sha256sum -c SHA256SUMS)
           {
@@ -125,6 +218,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload kernel
+        if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
         uses: actions/upload-artifact@v6
         with:
           name: linux-ps5-k73
@@ -133,11 +227,13 @@ jobs:
             ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}.sha256
             ${{ env.KERNEL_DIR }}/kernel/
             ${{ env.KERNEL_DIR }}/ps5-iw620/
+            ${{ env.KERNEL_DIR }}/kernel-cache-manifest.sha256
           if-no-files-found: error
           retention-days: 30
 
   image:
     needs: kernel
+    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
@@ -149,6 +245,9 @@ jobs:
       # Leave room for the base download, the raw image and the compressed
       # image.
       MIN_FREE_GB: 30
+      # xz otherwise applies its roughly 4 GiB automatic memory ceiling and
+      # drops this four-core runner to three compression threads.
+      XZ_COMPRESS_MEMLIMIT: 8GiB
 
     steps:
       - name: Checkout
@@ -159,20 +258,25 @@ jobs:
       - name: Free disk space
         run: |
           set -euo pipefail
-          echo "Before cleanup:"
+          free_gb() { df -B1G --output=avail / | tail -n1 | tr -d ' '; }
+          echo "Initial disk space:"
           df -h / /mnt 2>/dev/null || df -h /
-          sudo rm -rf \
-            /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
-            /usr/local/share/powershell /usr/local/share/chromium \
-            /usr/lib/jvm /opt/microsoft /opt/google /opt/az
-          docker system prune --all --force >/dev/null
-          echo "After cleanup:"
-          df -h / /mnt 2>/dev/null || df -h /
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "Removing preinstalled toolchains to make room"
+            sudo rm -rf \
+              /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+              /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
+              /usr/local/share/powershell /usr/local/share/chromium \
+              /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+            docker system prune --all --force >/dev/null
+            echo "After cleanup:"
+            df -h / /mnt 2>/dev/null || df -h /
+          else
+            echo "Cleanup not needed: $(free_gb) GiB free, need $MIN_FREE_GB GiB"
+          fi
           echo "CPUs: $(nproc)"; free -h
-          free_gb=$(df -B1G --output=avail / | tail -n1 | tr -d ' ')
-          if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
-            echo "::error::only ${free_gb} GB free on /, need ${MIN_FREE_GB} GB"
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "::error::only $(free_gb) GiB free on /, need $MIN_FREE_GB GiB"
             exit 1
           fi
 
@@ -202,6 +306,15 @@ jobs:
         run: |
           set -euo pipefail
           cd "$KERNEL_DIR"
+          test -s kernel-cache-manifest.sha256
+          unexpected=$(find "$PACKAGE" "$PACKAGE.sha256" kernel ps5-iw620 \
+            kernel-cache-manifest.sha256 ! -type d ! -type f -print)
+          if [ -n "$unexpected" ]; then
+            echo "::error::kernel bundle has a symlink or special file"
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+          sha256sum -c kernel-cache-manifest.sha256
           sha256sum -c "$PACKAGE.sha256"
           (cd ps5-iw620 && sha256sum -c SHA256SUMS)
           ls -lR
@@ -297,7 +410,8 @@ jobs:
           # Each GitHub release file must be under 2 GiB. The image is not split.
           limit=2147483648
           raw_sha=$(sha256sum "$IMAGE" | awk '{print $1}')
-          xz -T0 -9 -c "$IMAGE" > "$DIST/ps5-cachyos1160-k73.img.xz"
+          xz -T0 -9 --memlimit-compress="$XZ_COMPRESS_MEMLIMIT" -c "$IMAGE" \
+            > "$DIST/ps5-cachyos1160-k73.img.xz"
           cp "$OUT/cachyos1160-k73-root-changes.txt" "$DIST/"
 
           cd "$DIST"
