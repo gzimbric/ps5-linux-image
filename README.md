@@ -71,8 +71,7 @@ Each installation generates its own SSH host keys on first boot. No SSH host pri
 
 ### Hardware notes
 
-- Use Ethernet for the current profile. The PS5's onboard IW620 Wi-Fi modules are deliberately omitted and blacklisted because the successful control package did not contain a working IW620 driver and firmware combination.
-- Run 17 later brought up the onboard Wi-Fi on an installed copy of this image by adding NXP `mlan`/`moal` modules built for this exact kernel and the console's own firmware. This branch was not changed for that test, and images built from it still omit and blacklist the driver. The build, firmware location, and load scripts are in the porting repository's [Wi-Fi guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-wifi.md).
+- Onboard Wi-Fi on Marvell/NXP IW620 consoles (PCI `1b4b:2b56`). The image includes the NXP `mlan`/`moal` modules that ran in Run 17, under `/lib/modules/7.1.7/updates/ps5-iw620`, with the same options (`/etc/modprobe.d/ps5-iw620.conf`). It contains no Wi-Fi firmware. At boot, `ps5-iw620-firmware.service` copies `lib/nxp/pcieuartiw620_combo_v1.bin` from the FAT partition to `/lib/firmware/nxp/` if the file is there and is 498,108 bytes, then loads the driver. Only the `linux-1160-dma-e820-wifi` build of the firmware 11.60 loader writes that file, from the console's own kernel. With any other loader, or on a console with a different Wi-Fi chip, the service does nothing and Ethernet works as before. Once copied, the firmware stays in the root filesystem. See the porting repository's [Wi-Fi guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-wifi.md) for the driver sources and known limits.
 - `ps5fan.service` automatically requests the Run 16 control's fan servo pattern (`3`) during boot. That request was accepted on the tested console, but fan RPM and cooling performance were not measured; this is not a calibrated fan curve.
 - The boot-report service writes `ps5-boot-report.txt` to the FAT boot partition for systems without UART. That report can contain network addresses, MAC addresses, connection names, and journal identifiers. Review and redact it before posting it publicly.
 
@@ -107,7 +106,23 @@ For `ubuntu2404`, the build forces `linux/amd64`, uses the Debian Trixie image m
 - exact hashes for `.config`, the embedded cpio, `bzImage`, `System.map`, the 516 runtime modules, and the stripped `mts.ko`, plus a content check of the embedded `kheaders` archive
 - the Run 16 control's image-and-in-tree-modules-only Debian package shape, with no packaged headers or out-of-tree IW620 modules and without replacing Ubuntu's `linux-libc-dev`
 
-The installed-package manifest identifies the complete builder package/version set; it does not by itself prove that an arbitrary recipe change is harmless. The output validator separately checks the semantic Debian package tree, the complete module set, and the embedded kernel-header contents. The ordinary distro builder can still add the out-of-tree IW620 driver, but the exact Ubuntu 24.04 path deliberately stops before that generalized step because the hardware-tested control package did not contain those modules. Ubuntu rootfs packages and filesystem metadata can still vary, so the package/rootfs as a whole is not bit-reproducible even though the boot-critical kernel artifacts are checked.
+The installed-package manifest identifies the complete builder package/version set; it does not by itself prove that an arbitrary recipe change is harmless. The output validator separately checks the semantic Debian package tree, the complete module set, and the embedded kernel-header contents. The ordinary distro builder can still add the out-of-tree IW620 driver to its kernel package, but the exact Ubuntu 24.04 path deliberately stops before that generalized step because the hardware-tested control package did not contain those modules. The IW620 modules are built in a separate step instead, described below. Ubuntu rootfs packages and filesystem metadata can still vary, so the package/rootfs as a whole is not bit-reproducible even though the boot-critical kernel artifacts are checked.
+
+### IW620 Wi-Fi modules
+
+After the kernel package is built, `docker/kernel-builder/build-iw620.sh` builds `mlan.ko` and `moal.ko` against the same kernel tree, in the same builder, with no network access. The sources are pinned:
+
+- [ps5-linux/ps5-linux-mwifiex](https://github.com/ps5-linux/ps5-linux-mwifiex) `4aff9085530a3cdf7d5fbb124c006cc299ac3605`, for its patches;
+- [nxp-imx/mwifiex](https://github.com/nxp-imx/mwifiex) `lf-6.18.2_1.0.0` at `a5fe4e194bf99315e349d81d77d6dfacec70757a`, with `ps5-iw620.patch`, `ps5-iw620-cmd-timeout-recover.patch`, `ps5-iw620-kernel71-compat.patch` and `ps5-iw620-rtnl-bounded-wait.patch` applied in that order and checked by SHA-256. `ps5-iw620-kernel72-compat.patch` is not applied; it does not build on 7.1.7.
+
+objtool stays enabled (upstream's `CONFIG_OBJTOOL=` is not passed), so both modules keep their `.return_sites`. `vmlinux` is moved aside for the module build, as it was absent from the tree the Run 17 modules were built in, so no module BTF is generated. The stripped modules must then match the Run 17 modules byte for byte, or the build stops:
+
+| Module | SHA-256 |
+|---|---|
+| `mlan.ko` | `e6f8e649974767f26d9bd8c60b3b49e1203d5282700493864b7e6fd7be482b23` |
+| `moal.ko` | `3e00f26af4d71d6f459a56a1b99c435dcacb09d3ead28e0e722898a68a6347ed` |
+
+They are kept in `linux-bin/ubuntu2404/ps5-iw620/` next to the kernel package, not inside it, so the package and its verifier are unchanged. The image installs them in the root filesystem only. The five FAT boot files contain nothing from the Wi-Fi driver. The initramfs gets only the options file, because `mkinitramfs` copies every `/etc/modprobe.d/*.conf`; it has no Wi-Fi module or firmware. The image verifier checks that no IW620 firmware is anywhere in the image.
 
 The control image's `kheaders.ko` retained 142 incidental source/build mtimes and had SHA-256 `bc3c9cb46360fa779c2abac7b44ce0cfa788ec848d320306ffca09ef86a528bb`. The public build normalizes all embedded archive mtimes to `2026-08-29 18:01:15 UTC` and pins the resulting module SHA-256 `84565f3ecaa2c5a05fa49d1c37034a999fbf7b672faff85f8a444d1cbac23dd3`. Both contain the same 7,069 regular header files with content manifest `6212fdada4054c4bb2bec76e45fb04602c65cf5bec372bea380e3a249b083f75`; their module code and BTF sections are also identical. The whole-file difference is archive metadata and its resulting compression/layout, not header content.
 
@@ -130,10 +145,11 @@ This opens the image through a read-only loop device in the already-built
 GPT layout, labels, boot envelope, installed kernel tree, enabled services,
 default account, SSH-key hygiene, and recipe marker. The firmware-specific
 loader is delivered separately rather than stored in the image; when you have
-that ELF, include `--loader /path/to/loader.elf` to check its tested size and
-hash as part of the same run.
+that ELF, include `--loader /path/to/loader.elf` to check its size and hash
+against the known 11.60 builds (Run 15, DMA E820, and DMA E820 Wi-Fi) as part
+of the same run.
 
-After flashing, mount the FAT32 `boot` partition and compare its files with the enforced envelope:
+After flashing, and before the first boot, mount the FAT32 `boot` partition and compare its files with the enforced envelope. After a boot the partition also holds `ps5-boot-report.txt` and, with the Wi-Fi loader, `lib/nxp/`, so this check no longer applies:
 
 ```bash
 ./scripts/verify-ubuntu2404-boot.sh /path/to/mounted/boot

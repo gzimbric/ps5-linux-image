@@ -78,6 +78,26 @@ verify_source_file() {
     fi
 }
 
+# The NXP IW620 Wi-Fi modules are built against the exact kernel tree but are
+# kept out of its package. They must be byte-identical to the Run 17 modules
+# that ran on the console; the image installs them under updates/ps5-iw620.
+IW620_PS5_MWIFIEX_REPO=https://github.com/ps5-linux/ps5-linux-mwifiex.git
+IW620_PS5_MWIFIEX_COMMIT=4aff9085530a3cdf7d5fbb124c006cc299ac3605
+IW620_NXP_MWIFIEX_REPO=https://github.com/nxp-imx/mwifiex.git
+IW620_NXP_MWIFIEX_COMMIT=a5fe4e194bf99315e349d81d77d6dfacec70757a
+IW620_MLAN_SHA256=e6f8e649974767f26d9bd8c60b3b49e1203d5282700493864b7e6fd7be482b23
+IW620_MOAL_SHA256=3e00f26af4d71d6f459a56a1b99c435dcacb09d3ead28e0e722898a68a6347ed
+
+validate_ubuntu2404_iw620_modules() {
+    local dir="$KERNEL_OUT/ps5-iw620"
+    if [ ! -f "$dir/mlan.ko" ] || [ ! -f "$dir/moal.ko" ] ||
+        [ "$(sha256_file "$dir/mlan.ko")" != "$IW620_MLAN_SHA256" ] ||
+        [ "$(sha256_file "$dir/moal.ko")" != "$IW620_MOAL_SHA256" ]; then
+        echo "ERROR: $dir does not hold the Run 17 IW620 modules" >&2
+        return 1
+    fi
+}
+
 validate_ubuntu2404_kernel_cache() {
     local packages=("$KERNEL_OUT"/*.deb)
     if [ "${#packages[@]}" -ne 1 ] || [ ! -f "${packages[0]}" ] ||
@@ -85,7 +105,25 @@ validate_ubuntu2404_kernel_cache() {
         echo "ERROR: expected exactly one cached Debian package, named linux-ps5_*.deb" >&2
         return 1
     fi
-    "$SCRIPT_DIR/scripts/verify-ubuntu2404-kernel-deb.sh" "${packages[0]}"
+    "$SCRIPT_DIR/scripts/verify-ubuntu2404-kernel-deb.sh" "${packages[0]}" ||
+        return 1
+    validate_ubuntu2404_iw620_modules
+}
+
+# Fetch one commit into a repository without a working tree. The checkout
+# happens later on a Linux filesystem inside the builder.
+fetch_pinned_git() {
+    local dir=$1 url=$2 commit=$3
+    rm -rf "$dir"
+    git init -q "$dir"
+    git -C "$dir" remote add origin "$url"
+    git -C "$dir" fetch -q --depth 1 origin "$commit"
+    if [ "$(git -C "$dir" rev-parse FETCH_HEAD)" != "$commit" ]; then
+        echo "ERROR: $url did not return commit $commit" >&2
+        return 1
+    fi
+    git -C "$dir" update-ref refs/heads/pinned "$commit"
+    git -C "$dir" symbolic-ref HEAD refs/heads/pinned
 }
 
 if [ "$DISTRO" = "ubuntu2404" ]; then
@@ -114,11 +152,17 @@ if [ "$DISTRO" = "ubuntu2404" ]; then
     verify_source_file distros/ubuntu2404/files/ps5-amdgpu-reprobe.service \
         2409fd812118088098ce6b740acb913d872c1df1efdb38e6254d4d388cabe72e
     verify_source_file distros/ubuntu2404/files/ps5-boot-report \
-        0ffa81a72d57153590853c00c452f8a497ce951f986eb9c08ddfdd155e700f78
+        edfbaf7c3bb157700f08f26dfe2ffef6b07933d58ea1098b53e1232490e05939
     verify_source_file distros/ubuntu2404/files/ps5-boot-report.service \
         ecce500865af6769bc92cb41ad00a0d1fa62364480058c645323cbe9f40378a2
     verify_source_file distros/ubuntu2404/files/ps5-boot-report.timer \
         9074e18c67eaec808a8934417573020249d2c3938b8688fb9ef3b36307c04fec
+    verify_source_file distros/ubuntu2404/files/ps5-iw620.conf \
+        db60676ec451c7da77af8bbb226e9db8c33ca0ee1a0113230dd0d2b84af09058
+    verify_source_file distros/ubuntu2404/files/ps5-iw620-firmware \
+        dc5fa815b87d8d7219422bc0a48c82b7840916a8cbe9f7b6bdc88c1c256f4e80
+    verify_source_file distros/ubuntu2404/files/ps5-iw620-firmware.service \
+        8b17666574ea825f1ec6f9ee90410cd6ad35b5a7501a047e6947c28ccf1332d2
     verify_source_file distros/ubuntu2404/nm-dns.conf \
         80ee32ae2b4038691ef64248f5794e7d59cc34e626e181482af8037a0e338c04
     verify_source_file distros/ubuntu2404/grow-rootfs \
@@ -294,7 +338,7 @@ esac
 
 if [ "$DISTRO" = "ubuntu2404" ] && [ "$SKIP_KERNEL" = true ]; then
     if validate_ubuntu2404_kernel_cache; then
-        printf "  ✓ %-60s\n" "Ubuntu 24.04 cached kernel package verified"
+        printf "  ✓ %-60s\n" "Ubuntu 24.04 cached kernel package and IW620 modules verified"
     else
         echo "Ignoring an incompatible cached kernel package for ubuntu2404."
         SKIP_KERNEL=false
@@ -508,6 +552,7 @@ else
     KERNEL_SRC="$(cd "$KERNEL_SRC" && pwd)"
 
     rm -f "$KERNEL_OUT"/*.deb "$KERNEL_OUT"/*.pkg.tar.zst "$KERNEL_OUT"/*.rpm
+    rm -rf "$KERNEL_OUT/ps5-iw620"
 
     run_stage "Build kernel builder image" \
         docker build --platform "$KERNEL_BUILDER_PLATFORM" \
@@ -608,11 +653,25 @@ else
     esac
 
     if [ "$DISTRO" = "ubuntu2404" ]; then
+        IW620_SRC_DIR="$SCRIPT_DIR/work/iw620-ubuntu2404"
+        run_stage "Fetch ps5-linux-mwifiex ${IW620_PS5_MWIFIEX_COMMIT:0:7}" \
+            fetch_pinned_git "$IW620_SRC_DIR/ps5-linux-mwifiex" \
+                "$IW620_PS5_MWIFIEX_REPO" "$IW620_PS5_MWIFIEX_COMMIT"
+        run_stage "Fetch nxp-imx/mwifiex ${IW620_NXP_MWIFIEX_COMMIT:0:7}" \
+            fetch_pinned_git "$IW620_SRC_DIR/nxp-mwifiex" \
+                "$IW620_NXP_MWIFIEX_REPO" "$IW620_NXP_MWIFIEX_COMMIT"
+        run_stage "Build IW620 Wi-Fi modules" \
+            docker run --rm --platform "$KERNEL_BUILDER_PLATFORM" --name "$DOCKER_NAME" \
+                --network none --entrypoint /build-iw620.sh \
+                "${KERNEL_SOURCE_ARGS[@]}" \
+                -v "$IW620_SRC_DIR":/in:ro \
+                -v "$KERNEL_OUT":/out \
+                ps5-kernel-builder
         if ! validate_ubuntu2404_kernel_cache; then
             echo "ERROR: freshly built Ubuntu 24.04 kernel package failed validation" >&2
             exit 1
         fi
-        printf "  ✓ %-60s\n" "Ubuntu 24.04 fresh kernel package verified"
+        printf "  ✓ %-60s\n" "Ubuntu 24.04 fresh kernel package and IW620 modules verified"
         if [ -n "$KERNEL_BUILD_VOLUME" ]; then
             docker volume rm "$KERNEL_BUILD_VOLUME" >/dev/null
             KERNEL_BUILD_VOLUME=""

@@ -38,6 +38,7 @@ required_files=(
     docker/image-builder/entrypoint.sh
     docker/kernel-builder/Dockerfile
     docker/kernel-builder/build.sh
+    docker/kernel-builder/build-iw620.sh
     docker/kernel-builder/package-deb.sh
     docker/kernel-builder/repro-date
     distros/shared/zz-update-boot

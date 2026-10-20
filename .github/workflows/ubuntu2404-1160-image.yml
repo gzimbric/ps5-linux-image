@@ -196,6 +196,9 @@ jobs:
             echo "Kernel package:"
             sha256sum "$deb" | sed 's|linux-bin/ubuntu2404/||'
             echo
+            echo "IW620 Wi-Fi modules (installed under /lib/modules/7.1.7/updates/ps5-iw620):"
+            (cd linux-bin/ubuntu2404/ps5-iw620 && sha256sum mlan.ko moal.ko)
+            echo
             echo "FAT boot partition files:"
             cat "$DIST/boot-files.sha256"
             echo
@@ -247,6 +250,8 @@ jobs:
           This is a CI rebuild of the tested profile, not the Run 16 control image. The build checked that the boot files on the FAT partition match the tested envelope. The root filesystem, and so the raw image hash, differs from build to build.
 
           The firmware 11.60 loader is not part of this release. Use the loader build you were given for testing.
+
+          Onboard Wi-Fi: the image has the IW620 driver but no Wi-Fi firmware. The \`linux-1160-dma-e820-wifi\` loader build writes each console's own firmware to \`lib/nxp/\` on the FAT partition, and the image installs it at boot. With other loader builds, or on a console without the IW620 (PCI \`1b4b:2b56\`), Wi-Fi stays off and Ethernet works as before.
 
           Login is \`ps5\` / \`ubuntu\`. Change the password after the first boot.
 

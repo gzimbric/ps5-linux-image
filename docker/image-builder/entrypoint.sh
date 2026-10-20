@@ -76,13 +76,24 @@ assert_file_sha256 "$kheaders" \
     84565f3ecaa2c5a05fa49d1c37034a999fbf7b672faff85f8a444d1cbac23dd3 \
     kheaders.ko
 
+# 517 modules from the kernel package plus the two IW620 Wi-Fi modules.
 module_count=$(find "$modules" -type f -name '*.ko' -printf x | wc -c)
 module_count=${module_count//[[:space:]]/}
-assert_equal "kernel module count" "$module_count" 517
+assert_equal "kernel module count" "$module_count" 519
+
+iw620_files=$(cd "$modules" && find ./updates -type f -print | sort)
+assert_equal "IW620 module files" "$iw620_files" \
+    "$(printf '%s\n' ./updates/ps5-iw620/mlan.ko ./updates/ps5-iw620/moal.ko)"
+assert_file_sha256 "$modules/updates/ps5-iw620/mlan.ko" \
+    e6f8e649974767f26d9bd8c60b3b49e1203d5282700493864b7e6fd7be482b23 \
+    mlan.ko
+assert_file_sha256 "$modules/updates/ps5-iw620/moal.ko" \
+    3e00f26af4d71d6f459a56a1b99c435dcacb09d3ead28e0e722898a68a6347ed \
+    moal.ko
 
 non_kheaders_count=$(
     cd "$modules"
-    find . -type f -name '*.ko' \
+    find . -type f -name '*.ko' ! -path './updates/*' \
         ! -path './kernel/kernel/kheaders.ko' -printf x | wc -c
 )
 non_kheaders_count=${non_kheaders_count//[[:space:]]/}
@@ -90,7 +101,7 @@ assert_equal "non-kheaders module count" "$non_kheaders_count" 516
 
 non_kheaders_manifest=$(
     cd "$modules"
-    find . -type f -name '*.ko' \
+    find . -type f -name '*.ko' ! -path './updates/*' \
         ! -path './kernel/kernel/kheaders.ko' -print0 |
         sort -z |
         xargs -0 sha256sum |
@@ -269,7 +280,14 @@ EOF
                    /repo/distros/ubuntu2404/files/ps5-amdgpu-reprobe.service \
                    /repo/distros/ubuntu2404/files/ps5_fan_max.c \
                    /repo/distros/ubuntu2404/files/ps5fan.service \
+                   /repo/distros/ubuntu2404/files/ps5-iw620.conf \
+                   /repo/distros/ubuntu2404/files/ps5-iw620-firmware \
+                   /repo/distros/ubuntu2404/files/ps5-iw620-firmware.service \
                    "$STAGING/ps5-bootstrap/"
+                mkdir -p "$STAGING/ps5-iw620"
+                cp /kernel-debs/ps5-iw620/mlan.ko \
+                   /kernel-debs/ps5-iw620/moal.ko \
+                   "$STAGING/ps5-iw620/"
             fi
             ;;
         proxmox)
@@ -317,6 +335,7 @@ EOF
         ! -path "$STAGING/debs/*" \
         ! -path "$STAGING/pkgs/*" \
         ! -path "$STAGING/rpms/*" \
+        ! -path "$STAGING/ps5-iw620/*" \
         -exec sed -i 's/\r$//' {} +
 
     # --- Build rootfs ---

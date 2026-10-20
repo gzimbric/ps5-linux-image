@@ -243,10 +243,17 @@ fi
 if [ -n "$loader_path" ]; then
     [ -f "$loader_path" ] || fail "not a regular file: $loader_path"
     assert_equal "loader ELF size" "$(file_size "$loader_path")" 169872
-    assert_file_sha256 "$loader_path" \
-        422b87ec39ca0edfce8dddd609c2eff1cc7adcb2732b7909b76fafbd60dd2336 \
-        "firmware 11.60 loader ELF"
-    echo "loader ELF: OK"
+    loader_hash=$(sha256_file "$loader_path")
+    case $loader_hash in
+        422b87ec39ca0edfce8dddd609c2eff1cc7adcb2732b7909b76fafbd60dd2336)
+            echo "loader ELF: OK (Run 15 build, no Wi-Fi firmware dump)" ;;
+        2e1758a2d013305bcb9faa0eb3adf18c34ed76ad85313dd945719c8bf2a0c9c0)
+            echo "loader ELF: OK (DMA E820 build, no Wi-Fi firmware dump)" ;;
+        461d4946f42ca646aff39920a9f457fd285679587b0e0017e970a5206b9a17ab)
+            echo "loader ELF: OK (DMA E820 Wi-Fi build, dumps the IW620 firmware)" ;;
+        *)
+            fail "firmware 11.60 loader ELF SHA-256 is $loader_hash; not a known 11.60 build" ;;
+    esac
 else
     echo "loader ELF: not checked (it is delivered separately and is not in the disk image)"
 fi
@@ -490,11 +497,11 @@ verify_rootfs() {
 
     grep -Eq '(^|/)etc/modprobe.d/ps5-amdgpu\.conf$' "$initrd_contents" ||
         fail "PS5 amdgpu policy is missing from the initramfs"
-    grep -Eq '(^|/)etc/modprobe.d/ps5-iw620-noautoload\.conf$' \
-        "$initrd_contents" ||
-        fail "IW620 no-autoload policy is missing from the initramfs"
-    if grep -Eq '(^|/)etc/modules-load.d/moal$' "$initrd_contents"; then
-        fail "IW620 autoload file is present in the initramfs"
+    # The Wi-Fi driver and its firmware live only in the rootfs. mkinitramfs
+    # copies /etc/modprobe.d, so only the options file is expected there.
+    if grep -Eq '(^|/)(etc/modules-load.d/moal|etc/modprobe.d/ps5-iw620-noautoload\.conf|(mlan|moal)\.ko(\.(gz|xz|zst))?|pcieuartiw620_combo_v1\.bin[^/]*)$' \
+        "$initrd_contents"; then
+        fail "an IW620 driver, blacklist or firmware file is in the initramfs"
     fi
 
     initrd_extract=$initrd_tmp/extracted
@@ -516,11 +523,11 @@ verify_rootfs() {
     assert_file_sha256 "$embedded_amdgpu_policy" \
         b8790c02b88ea706e6d5bb495996e3ddfffcc3f3a0caa35aa8d8384a96ac6f64 \
         "PS5 amdgpu policy in initramfs"
-    embedded_iw620_policy=$(find_single_initrd_file \
-        etc/modprobe.d/ps5-iw620-noautoload.conf)
-    assert_file_sha256 "$embedded_iw620_policy" \
-        e12a72fdbfe929e6628c6e68bfb398291f84503f47715248b1146a2ff943fe88 \
-        "IW620 no-autoload policy in initramfs"
+    embedded_iw620_options=$(find_single_initrd_file \
+        etc/modprobe.d/ps5-iw620.conf)
+    assert_file_sha256 "$embedded_iw620_options" \
+        db60676ec451c7da77af8bbb226e9db8c33ca0ee1a0113230dd0d2b84af09058 \
+        "IW620 options in initramfs"
 
     while read -r firmware_name firmware_hash; do
         firmware_file=cyan_skillfish2_${firmware_name}.bin
@@ -542,9 +549,18 @@ EOF_FIRMWARE_HASHES
     assert_file_sha256 "$root_dir/etc/modprobe.d/ps5-amdgpu.conf" \
         b8790c02b88ea706e6d5bb495996e3ddfffcc3f3a0caa35aa8d8384a96ac6f64 \
         ps5-amdgpu-policy
-    assert_file_sha256 "$root_dir/etc/modprobe.d/ps5-iw620-noautoload.conf" \
-        e12a72fdbfe929e6628c6e68bfb398291f84503f47715248b1146a2ff943fe88 \
-        ps5-iw620-policy
+    assert_file_sha256 "$root_dir/etc/modprobe.d/ps5-iw620.conf" \
+        db60676ec451c7da77af8bbb226e9db8c33ca0ee1a0113230dd0d2b84af09058 \
+        ps5-iw620-options
+    [ ! -e "$root_dir/etc/modprobe.d/ps5-iw620-noautoload.conf" ] ||
+        fail "the IW620 blacklist file is present"
+    for modprobe_dir in "$root_dir/etc/modprobe.d" "$root_dir/usr/lib/modprobe.d"; do
+        [ -d "$modprobe_dir" ] || continue
+        if grep -rqsE '^[[:space:]]*blacklist[[:space:]]+(moal|mlan)([[:space:]]|$)' \
+            "$modprobe_dir"; then
+            fail "moal or mlan is blacklisted in $modprobe_dir"
+        fi
+    done
 
     rm -rf "$initrd_tmp"
     initrd_tmp=
@@ -580,21 +596,49 @@ EOF_FIRMWARE_HASHES
     [ -z "$compressed_module" ] ||
         fail "unexpected compressed kernel module: $compressed_module"
 
+    # 517 modules from the kernel package plus the two IW620 Wi-Fi modules.
     module_count=$(find "$modules" -type f -name '*.ko' -printf x | wc -c)
     module_count=$(printf '%s' "$module_count" | tr -d '[:space:]')
-    assert_equal "kernel module count" "$module_count" 517
+    assert_equal "kernel module count" "$module_count" 519
+
+    iw620_files=$(cd "$modules" && find ./updates -type f -print | sort)
+    assert_equal "IW620 module files" "$iw620_files" \
+        "$(printf '%s\n' ./updates/ps5-iw620/mlan.ko ./updates/ps5-iw620/moal.ko)"
+    assert_file_sha256 "$modules/updates/ps5-iw620/mlan.ko" \
+        e6f8e649974767f26d9bd8c60b3b49e1203d5282700493864b7e6fd7be482b23 \
+        mlan.ko
+    assert_file_sha256 "$modules/updates/ps5-iw620/moal.ko" \
+        3e00f26af4d71d6f459a56a1b99c435dcacb09d3ead28e0e722898a68a6347ed \
+        moal.ko
+    assert_line "$modules/modules.alias" \
+        'alias pci:v00001B4Bd00002B56sv*sd*bc*sc*i* moal' modules.alias
+    moal_deps=$(awk '$1 == "updates/ps5-iw620/moal.ko:"' "$modules/modules.dep")
+    [ -n "$moal_deps" ] ||
+        fail "modules.dep has no entry for updates/ps5-iw620/moal.ko"
+    for dependency in updates/ps5-iw620/mlan.ko kernel/net/wireless/cfg80211.ko; do
+        case " $moal_deps " in
+            *" $dependency "*) ;;
+            *) fail "modules.dep does not list $dependency for updates/ps5-iw620/moal.ko" ;;
+        esac
+    done
+
+    firmware_blob=$(find "$root_dir/usr/lib/firmware" "$root_dir/boot" \
+        "$root_dir/opt" "$root_dir/etc" "$root_dir/home" "$root_dir/root" \
+        -name 'pcieuartiw620_combo_v1.bin*' -print -quit 2>/dev/null || true)
+    [ -z "$firmware_blob" ] ||
+        fail "public image contains IW620 firmware: $firmware_blob"
 
     kheaders=$modules/kernel/kernel/kheaders.ko
     non_kheaders_count=$(
         cd "$modules"
-        find . -type f -name '*.ko' \
+        find . -type f -name '*.ko' ! -path './updates/*' \
             ! -path './kernel/kernel/kheaders.ko' -printf x | wc -c
     )
     non_kheaders_count=$(printf '%s' "$non_kheaders_count" | tr -d '[:space:]')
     assert_equal "non-kheaders module count" "$non_kheaders_count" 516
     non_kheaders_manifest=$(
         cd "$modules"
-        find . -type f -name '*.ko' \
+        find . -type f -name '*.ko' ! -path './updates/*' \
             ! -path './kernel/kernel/kheaders.ko' -print0 |
             sort -z |
             xargs -0 sha256sum |
@@ -609,6 +653,7 @@ EOF_FIRMWARE_HASHES
         mts.ko
     verify_kheaders "$kheaders"
     echo "installed kernel, modules, and embedded headers: OK"
+    echo "IW620 Wi-Fi modules and options: OK (no firmware in the image)"
 
     if [ -n "${EXPECTED_PROFILE_ID:-}" ]; then
         expected_profile_id=$EXPECTED_PROFILE_ID
@@ -742,8 +787,14 @@ PY
         2409fd812118088098ce6b740acb913d872c1df1efdb38e6254d4d388cabe72e \
         ps5-amdgpu-reprobe.service
     assert_file_sha256 "$root_dir/usr/local/sbin/ps5-boot-report" \
-        0ffa81a72d57153590853c00c452f8a497ce951f986eb9c08ddfdd155e700f78 \
+        edfbaf7c3bb157700f08f26dfe2ffef6b07933d58ea1098b53e1232490e05939 \
         ps5-boot-report
+    assert_file_sha256 "$root_dir/usr/local/sbin/ps5-iw620-firmware" \
+        dc5fa815b87d8d7219422bc0a48c82b7840916a8cbe9f7b6bdc88c1c256f4e80 \
+        ps5-iw620-firmware
+    assert_file_sha256 "$root_dir/etc/systemd/system/ps5-iw620-firmware.service" \
+        8b17666574ea825f1ec6f9ee90410cd6ad35b5a7501a047e6947c28ccf1332d2 \
+        ps5-iw620-firmware.service
     assert_file_sha256 "$root_dir/etc/systemd/system/ps5-boot-report.service" \
         ecce500865af6769bc92cb41ad00a0d1fa62364480058c645323cbe9f40378a2 \
         ps5-boot-report.service
@@ -754,7 +805,8 @@ PY
     for unit in NetworkManager.service ssh.service \
         grow-rootfs.service systemd-resolved.service \
         ps5-ssh-host-keys.service ps5fan.service \
-        ps5-amdgpu-reprobe.service ps5-boot-report.timer; do
+        ps5-amdgpu-reprobe.service ps5-iw620-firmware.service \
+        ps5-boot-report.timer; do
         unit_state=$(systemctl --root="$root_dir" is-enabled "$unit" 2>/dev/null || true)
         assert_equal "$unit state" "$unit_state" enabled
     done

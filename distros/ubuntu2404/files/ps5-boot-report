@@ -44,6 +44,41 @@ bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
     lspci -nnk 2>&1 || true
 
     echo
+    echo "[wifi]"
+    for firmware in /boot/efi/lib/nxp/pcieuartiw620_combo_v1.bin \
+        /lib/firmware/nxp/pcieuartiw620_combo_v1.bin; do
+        if [ -f "$firmware" ]; then
+            printf '%s %s bytes %s\n' "$firmware" "$(stat -c %s "$firmware")" \
+                "$(sha256sum "$firmware" | cut -d' ' -f1)"
+        else
+            printf '%s missing\n' "$firmware"
+        fi
+    done
+    for module in cfg80211 mlan moal; do
+        if [ -d "/sys/module/$module" ]; then
+            printf 'module %s loaded\n' "$module"
+        else
+            printf 'module %s not loaded\n' "$module"
+        fi
+    done
+    for dev in /sys/bus/pci/devices/*; do
+        [ "$(cat "$dev/vendor" 2>/dev/null)" = 0x1b4b ] || continue
+        [ "$(cat "$dev/device" 2>/dev/null)" = 0x2b56 ] || continue
+        driver=none
+        [ ! -e "$dev/driver" ] || driver=$(basename "$(readlink "$dev/driver")")
+        net=
+        for iface in "$dev"/net/*; do
+            [ ! -e "$iface" ] || net="$net ${iface##*/}"
+        done
+        printf '%s driver=%s net=%s\n' "${dev##*/}" "$driver" "${net# }"
+    done
+    # Count only; network names stay out of the report.
+    printf 'wifi networks in scan: '
+    nmcli --terse --fields SSID device wifi list 2>/dev/null | wc -l
+    dmesg --color=never 2>&1 | grep -E 'wlan:|WLAN|PCIEIW620|FW download|Request firmware|request_firmware' \
+        | tail -n 40 || true
+
+    echo
     echo "[display]"
     for status_file in /sys/class/drm/card*-*/status; do
         [ -e "$status_file" ] || continue
@@ -70,7 +105,7 @@ bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
     systemctl --no-pager --full status \
         NetworkManager.service ssh.service gdm3.service \
         ps5fan.service ps5-amdgpu-reprobe.service \
-        ps5-boot-report.timer 2>&1 || true
+        ps5-iw620-firmware.service ps5-boot-report.timer 2>&1 || true
     systemctl --no-pager --full --failed 2>&1 || true
     systemctl --no-pager --full list-jobs 2>&1 || true
 } > "$summary" 2>&1

@@ -102,6 +102,10 @@ files:
   generator: copy
   source: /tmp/build-staging/ps5-bootstrap
 
+- path: /opt/ps5-iw620/
+  generator: copy
+  source: /tmp/build-staging/ps5-iw620
+
 actions:
 - trigger: post-unpack
   action: |-
@@ -226,10 +230,6 @@ actions:
     install -d -m 0755 /etc/modprobe.d
     printf '%s\n' 'options amdgpu dpm=0 gpu_recovery=0 force_1080p=1' \
         > /etc/modprobe.d/ps5-amdgpu.conf
-    cat > /etc/modprobe.d/ps5-iw620-noautoload.conf <<'EOF'
-    blacklist moal
-    blacklist mlan
-    EOF
     install -d -m 0755 /etc/modules-load.d
     printf 'mts\n' > /etc/modules-load.d/ps5-ethernet.conf
 
@@ -253,9 +253,14 @@ actions:
     expected_fan_service=19711fd4b0d001a0e4218e6051341b63cff6369420f5b999c4868d731c1d9404
     expected_reprobe=6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
     expected_reprobe_service=2409fd812118088098ce6b740acb913d872c1df1efdb38e6254d4d388cabe72e
-    expected_report=0ffa81a72d57153590853c00c452f8a497ce951f986eb9c08ddfdd155e700f78
+    expected_report=edfbaf7c3bb157700f08f26dfe2ffef6b07933d58ea1098b53e1232490e05939
     expected_report_service=ecce500865af6769bc92cb41ad00a0d1fa62364480058c645323cbe9f40378a2
     expected_report_timer=9074e18c67eaec808a8934417573020249d2c3938b8688fb9ef3b36307c04fec
+    expected_iw620_conf=db60676ec451c7da77af8bbb226e9db8c33ca0ee1a0113230dd0d2b84af09058
+    expected_iw620_firmware=dc5fa815b87d8d7219422bc0a48c82b7840916a8cbe9f7b6bdc88c1c256f4e80
+    expected_iw620_firmware_service=8b17666574ea825f1ec6f9ee90410cd6ad35b5a7501a047e6947c28ccf1332d2
+    expected_mlan=e6f8e649974767f26d9bd8c60b3b49e1203d5282700493864b7e6fd7be482b23
+    expected_moal=3e00f26af4d71d6f459a56a1b99c435dcacb09d3ead28e0e722898a68a6347ed
     test "$(sha256sum /opt/ps5-bootstrap/ps5_fan_max.c | awk '{print $1}')" = "$expected_fan_source"
     test "$(sha256sum /opt/ps5-bootstrap/ps5fan.service | awk '{print $1}')" = "$expected_fan_service"
     test "$(sha256sum /opt/ps5-bootstrap/ps5-amdgpu-reprobe | awk '{print $1}')" = "$expected_reprobe"
@@ -263,6 +268,11 @@ actions:
     test "$(sha256sum /opt/ps5-bootstrap/ps5-boot-report | awk '{print $1}')" = "$expected_report"
     test "$(sha256sum /opt/ps5-bootstrap/ps5-boot-report.service | awk '{print $1}')" = "$expected_report_service"
     test "$(sha256sum /opt/ps5-bootstrap/ps5-boot-report.timer | awk '{print $1}')" = "$expected_report_timer"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5-iw620.conf | awk '{print $1}')" = "$expected_iw620_conf"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5-iw620-firmware | awk '{print $1}')" = "$expected_iw620_firmware"
+    test "$(sha256sum /opt/ps5-bootstrap/ps5-iw620-firmware.service | awk '{print $1}')" = "$expected_iw620_firmware_service"
+    test "$(sha256sum /opt/ps5-iw620/mlan.ko | awk '{print $1}')" = "$expected_mlan"
+    test "$(sha256sum /opt/ps5-iw620/moal.ko | awk '{print $1}')" = "$expected_moal"
 
     gcc -std=c11 -Os -Wall -Wextra -Werror \
         -o /usr/local/sbin/ps5_fan_max \
@@ -312,6 +322,12 @@ actions:
         /etc/systemd/system/ps5-boot-report.service
     install -m 0644 /opt/ps5-bootstrap/ps5-boot-report.timer \
         /etc/systemd/system/ps5-boot-report.timer
+    install -m 0644 /opt/ps5-bootstrap/ps5-iw620.conf \
+        /etc/modprobe.d/ps5-iw620.conf
+    install -m 0755 /opt/ps5-bootstrap/ps5-iw620-firmware \
+        /usr/local/sbin/ps5-iw620-firmware
+    install -m 0644 /opt/ps5-bootstrap/ps5-iw620-firmware.service \
+        /etc/systemd/system/ps5-iw620-firmware.service
 
     # Keep the exact uncompressed firmware payloads used on the successful
     # display boot. A package drift here stops the image build.
@@ -380,7 +396,6 @@ actions:
     dest="$DESTDIR/usr/lib/firmware/amdgpu"
     mkdir -p "$dest" "$DESTDIR/etc/modprobe.d"
     cp /etc/modprobe.d/ps5-amdgpu.conf "$DESTDIR/etc/modprobe.d/"
-    cp /etc/modprobe.d/ps5-iw620-noautoload.conf "$DESTDIR/etc/modprobe.d/"
     for name in ce me mec mec2 pfp rlc sdma sdma1; do
         file="cyan_skillfish2_${name}.bin"
         test -f "/usr/lib/firmware/amdgpu/$file"
@@ -428,17 +443,43 @@ actions:
     test "$(sha256sum "$mts_module" | awk '{print $1}')" = \
         2d7ac8e6ecce80e0f23b624cec66835325951c5bc9c4e620e5f57283caa279a2
 
-    # The proven package contains no out-of-tree IW620 modules. Remove every
-    # automatic load path, including any stale files from a cached rootfs.
+    # The kernel package has no IW620 driver. Install the Run 17 modules,
+    # built against this exact kernel tree, outside the package. udev loads
+    # moal through its PCI alias; ps5-iw620-firmware.service installs the
+    # console's own firmware from the boot partition and reloads it if the
+    # first probe ran without firmware. Upstream's helper and the generic
+    # modules-load.d entry stay off.
     rm -f /etc/modules-load.d/moal
     rm -f /etc/systemd/system/sysinit.target.wants/ps5-stage-firmware.service
     rm -f /etc/systemd/system/ps5-stage-firmware.service
     ln -s /dev/null /etc/systemd/system/ps5-stage-firmware.service
-    grep -qxF 'blacklist moal' /etc/modprobe.d/ps5-iw620-noautoload.conf
-    grep -qxF 'blacklist mlan' /etc/modprobe.d/ps5-iw620-noautoload.conf
+    rm -f /etc/modprobe.d/ps5-iw620-noautoload.conf
+    if grep -rqsE '^[[:space:]]*blacklist[[:space:]]+(moal|mlan)([[:space:]]|$)' \
+        /etc/modprobe.d /usr/lib/modprobe.d /lib/modprobe.d; then
+        echo "IW620 driver is still blacklisted" >&2
+        exit 1
+    fi
+    iw620_modules="/lib/modules/$KVER/updates/ps5-iw620"
+    install -d -m 0755 "$iw620_modules"
+    install -m 0644 /opt/ps5-iw620/mlan.ko "$iw620_modules/mlan.ko"
+    install -m 0644 /opt/ps5-iw620/moal.ko "$iw620_modules/moal.ko"
+    rm -rf /opt/ps5-iw620
+
+    # No IW620 firmware may ship in the image. Each console supplies its own.
+    if find /usr/lib/firmware /boot /opt -name 'pcieuartiw620_combo_v1.bin*' \
+        -print -quit | grep -q .; then
+        echo "IW620 firmware found in the image" >&2
+        exit 1
+    fi
 
     rm -f /etc/kernel/postinst.d/zz-update-boot
     depmod -a "$KVER"
+    test "$(modinfo -k "$KVER" -F filename mlan)" = "$iw620_modules/mlan.ko"
+    test "$(modinfo -k "$KVER" -F filename moal)" = "$iw620_modules/moal.ko"
+    grep -qxF 'alias pci:v00001B4Bd00002B56sv*sd*bc*sc*i* moal' \
+        "/lib/modules/$KVER/modules.alias"
+    test "$(sha256sum "$iw620_modules/mlan.ko" | awk '{print $1}')" = "$expected_mlan"
+    test "$(sha256sum "$iw620_modules/moal.ko" | awk '{print $1}')" = "$expected_moal"
     update-initramfs -u -k "$KVER"
     initrd="/boot/initrd.img-$KVER"
     test -s "$initrd"
@@ -466,9 +507,13 @@ actions:
     require_driver CONFIG_USB_HID '(^|/)usbhid\.ko(\.(gz|xz|zst))?$'
     require_driver CONFIG_HID_GENERIC '(^|/)hid[_-]generic\.ko(\.(gz|xz|zst))?$'
     grep -Eq '(^|/)etc/modprobe.d/ps5-amdgpu.conf$' /tmp/ps5-initrd.contents
-    grep -Eq '(^|/)etc/modprobe.d/ps5-iw620-noautoload.conf$' /tmp/ps5-initrd.contents
-    if grep -Eq '(^|/)etc/modules-load.d/moal$' /tmp/ps5-initrd.contents; then
-        echo "IW620 autoload file leaked into initramfs" >&2
+    # The Wi-Fi driver and its firmware live only in the root filesystem.
+    # mkinitramfs copies every /etc/modprobe.d/*.conf, so the options file is
+    # the one IW620 file in the initramfs; it is checked below.
+    iw620_initrd_pattern='(^|/)(etc/modules-load.d/moal|(mlan|moal)\.ko(\.(gz|xz|zst))?|pcieuartiw620_combo_v1\.bin[^/]*)$'
+    if grep -Eq "$iw620_initrd_pattern" /tmp/ps5-initrd.contents; then
+        grep -E "$iw620_initrd_pattern" /tmp/ps5-initrd.contents >&2
+        echo "IW620 driver or firmware leaked into initramfs" >&2
         exit 1
     fi
 
@@ -479,11 +524,15 @@ actions:
     test "${#amdgpu_policy[@]}" -eq 1
     test "$(sha256sum "${amdgpu_policy[0]}" | awk '{print $1}')" = \
         b8790c02b88ea706e6d5bb495996e3ddfffcc3f3a0caa35aa8d8384a96ac6f64
-    mapfile -t iw620_policy < <(find "$audit_dir" -type f \
-        -path '*/etc/modprobe.d/ps5-iw620-noautoload.conf' -print)
-    test "${#iw620_policy[@]}" -eq 1
-    test "$(sha256sum "${iw620_policy[0]}" | awk '{print $1}')" = \
-        e12a72fdbfe929e6628c6e68bfb398291f84503f47715248b1146a2ff943fe88
+    mapfile -t iw620_options < <(find "$audit_dir" -type f \
+        -path '*/etc/modprobe.d/ps5-iw620.conf' -print)
+    test "${#iw620_options[@]}" -eq 1
+    test "$(sha256sum "${iw620_options[0]}" | awk '{print $1}')" = "$expected_iw620_conf"
+    if find "$audit_dir" -type f -path '*/etc/modprobe.d/ps5-iw620-noautoload.conf' \
+        -print -quit | grep -q .; then
+        echo "IW620 blacklist leaked into initramfs" >&2
+        exit 1
+    fi
     while read -r name expected; do
         file="cyan_skillfish2_${name}.bin"
         mapfile -t matches < <(find "$audit_dir" -type f \
@@ -525,12 +574,18 @@ actions:
     systemctl enable ps5fan.service
     systemctl enable ps5-amdgpu-reprobe.service
     systemctl enable ps5-boot-report.timer
+    systemctl enable ps5-iw620-firmware.service
     # This is an offline image build; no systemd manager is running in the
     # chroot. `systemctl enable` has already created the persistent symlinks.
     test "$(systemctl is-enabled ps5-ssh-host-keys.service)" = enabled
     test "$(systemctl is-enabled ps5fan.service)" = enabled
     test "$(systemctl is-enabled ps5-amdgpu-reprobe.service)" = enabled
     test "$(systemctl is-enabled ps5-boot-report.timer)" = enabled
+    test "$(systemctl is-enabled ps5-iw620-firmware.service)" = enabled
+    test "$(sha256sum /etc/modprobe.d/ps5-iw620.conf | awk '{print $1}')" = "$expected_iw620_conf"
+    test "$(sha256sum /usr/local/sbin/ps5-iw620-firmware | awk '{print $1}')" = "$expected_iw620_firmware"
+    test "$(sha256sum /etc/systemd/system/ps5-iw620-firmware.service | awk '{print $1}')" = "$expected_iw620_firmware_service"
+    test ! -e /etc/modprobe.d/ps5-iw620-noautoload.conf
     test "$(sha256sum /usr/local/sbin/ps5-amdgpu-reprobe | awk '{print $1}')" = "$expected_reprobe"
     test "$(sha256sum /etc/systemd/system/ps5-amdgpu-reprobe.service | awk '{print $1}')" = "$expected_reprobe_service"
     test "$(sha256sum /usr/local/sbin/ps5-boot-report | awk '{print $1}')" = "$expected_report"

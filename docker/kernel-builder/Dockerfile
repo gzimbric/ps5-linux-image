@@ -36,8 +36,9 @@ WORKDIR /src
 # Build artifacts are staged to /out/staging
 
 COPY docker/kernel-builder/build.sh /build.sh
+COPY docker/kernel-builder/build-iw620.sh /build-iw620.sh
 COPY docker/kernel-builder/package-deb.sh /package-deb.sh
 COPY docker/kernel-builder/repro-date /run16-repro-bin/date
-RUN chmod +x /build.sh /package-deb.sh /run16-repro-bin/date
+RUN chmod +x /build.sh /build-iw620.sh /package-deb.sh /run16-repro-bin/date
 
 CMD ["/build.sh"]
