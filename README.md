@@ -1,6 +1,6 @@
 # PS5 Linux Image Builder
 
-Builds bootable Linux USB images for PlayStation 5 using Docker containers. This branch adds a public Ubuntu 24.04 profile that enforces the boot-critical envelope of the Run 16 control image that booted successfully on PS5 firmware 11.60, while retaining the upstream Ubuntu 26.04, Arch, CachyOS, and Fedora profiles.
+Builds bootable Linux USB images for PlayStation 5 using Docker containers. This fork's default `main` branch includes a public Ubuntu 24.04 profile that enforces the boot-critical envelope of the Run 16 control image that booted successfully on PS5 firmware 11.60, while retaining the upstream Ubuntu 26.04, Arch, CachyOS, and Fedora profiles.
 
 ## Ubuntu 24.04 firmware 11.60 tested envelope
 
@@ -13,11 +13,11 @@ Use the two-stage reproduction workflow:
 
 The first command starts from clean caches and builds and validates the pinned kernel package. The second intentionally reuses that verified package while assembling a fresh Ubuntu root filesystem and raw image. Image assembly audits the temporary raw image before publishing `output/ps5-ubuntu2404.img`.
 
-The source-clean kernel/package build and fresh image assembly from this public branch passed their software validation gates. That does not constitute a PS5 hardware boot of the public branch. The hardware result remains the separate Run 16 control image, which booted on firmware 11.60. A single `./build_image.sh --clean --distro ubuntu2404` run from an empty cache has not been validated and is not claimed here.
+The source-clean kernel/package build and fresh image assembly from this public profile passed their software validation gates. That does not constitute a PS5 hardware boot of a fresh rebuild. The hardware result remains the separate Run 16 control image, which booted on firmware 11.60. A single `./build_image.sh --clean --distro ubuntu2404` run from an empty cache has not been validated and is not claimed here.
 
 The successful control image was 16,777,216,000 bytes (16,000 MiB), which is the default for this profile. The matching firmware 11.60 USB and boot procedure is documented in the [porting guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-run16-usb.md).
 
-The branch itself holds only source and build instructions. Test images built by CI are covered in [Prebuilt test image](#prebuilt-test-image). Review the licenses of the inherited builder and installed distribution packages before redistributing a built image.
+The repository holds only source and build instructions. Test images built by CI are covered in [Prebuilt test image](#prebuilt-test-image). Review the licenses of the inherited builder and installed distribution packages before redistributing a built image.
 
 ### Prebuilt test image
 
@@ -34,15 +34,9 @@ xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fs
 
 On macOS, check with `shasum -a 256 -c --ignore-missing SHA256SUMS` and flash to `/dev/rdiskN`. balenaEtcher and Raspberry Pi Imager can flash the `.img.xz` without unpacking it first. To check the decompressed image itself, compare `xz -dc ps5-ubuntu2404.img.xz | sha256sum` with the `ps5-ubuntu2404.img` line in `SHA256SUMS`.
 
-GitHub caps release files at 2 GiB. If a build's `.img.xz` is larger than 1,900 MiB, the release has numbered parts (`ps5-ubuntu2404.img.xz.001`, `.002`, ...) instead of one file. Download every part, then check and join them before flashing:
-
-```bash
-sha256sum -c --ignore-missing SHA256SUMS
-cat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz
-sha256sum -c --ignore-missing SHA256SUMS
-```
-
-On Windows, join the parts with `copy /b ps5-ubuntu2404.img.xz.001 + ps5-ubuntu2404.img.xz.002 ps5-ubuntu2404.img.xz`, adding a `+` for each further part.
+Every release uses one `ps5-ubuntu2404.img.xz`. The workflow compresses at
+XZ level 9 and stops before creating a release if the result reaches GitHub's
+2 GiB per-file limit; it never publishes numbered parts.
 
 The image is 16,777,216,000 bytes, which is more than many 16 GB USB drives hold. Use a 32 GB or larger drive. The root partition grows to fill the drive on first boot. The firmware 11.60 loader is not part of the image or the release.
 
@@ -72,7 +66,7 @@ Each installation generates its own SSH host keys on first boot. No SSH host pri
 ### Hardware notes
 
 - Use Ethernet for the current profile. The PS5's onboard IW620 Wi-Fi modules are deliberately omitted and blacklisted because the successful control package did not contain a working IW620 driver and firmware combination.
-- Run 17 later brought up the onboard Wi-Fi on an installed copy of this image by adding NXP `mlan`/`moal` modules built for this exact kernel and the console's own firmware. This branch was not changed for that test, and images built from it still omit and blacklist the driver. The build, firmware location, and load scripts are in the porting repository's [Wi-Fi guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-wifi.md).
+- Run 17 later brought up the onboard Wi-Fi on an installed copy of this image by adding NXP `mlan`/`moal` modules built for this exact kernel and the console's own firmware. The Ubuntu profile was not changed for that test, and images built from it still omit and blacklist the driver. The build, firmware location, and load scripts are in the porting repository's [Wi-Fi guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-wifi.md).
 - `ps5fan.service` automatically requests the Run 16 control's fan servo pattern (`3`) during boot. That request was accepted on the tested console, but fan RPM and cooling performance were not measured; this is not a calibrated fan curve.
 - The boot-report service writes `ps5-boot-report.txt` to the FAT boot partition for systems without UART. That report can contain network addresses, MAC addresses, connection names, and journal identifiers. Review and redact it before posting it publicly.
 
@@ -159,7 +153,63 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 
 ## CachyOS 7.3 for 11.60
 
-The `cachyos1160-k73` profile is the same official CachyOS image on Linux 7.3.0. The kernel is mainline v7.3 with the 7.3 port of the PS5 patches by rmux (Armandas Kvietkus), [rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at `36f173f`, which also brings rmux's PS5 CPU and GPU frequency drivers. The image builds them as modules and does not load them at boot. It also ships the IW620 Wi-Fi driver built for this kernel (but no Wi-Fi firmware), holds the kernel package in pacman, and updates the boot files from a pacman hook. Its boot files are not the exact sizes the earlier 11.60 loaders require, so it needs a bounded 11.60 loader build from [gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader) `main`: `make linux-1160-dma-e820-bounded-wifi` for Wi-Fi, or `make linux-1160-dma-e820-bounded`. The bounded Wi-Fi artifact built at `98925a2` booted in Run 21; the bounded build without the Wi-Fi dump remains unbooted. There is not yet a published prebuilt release, and the similarly named `linux-1160-dma-e820-wifi` is not the bounded build. On Linux x86_64:
+The current test candidate is **image 2**, tag
+`cachyos1160-k73-image-2`, which resolves to source commit
+`346088a48f66eb956dafdec9de5085e73b2d44a5` and packages
+`linux-ps5 7.3.0-2`. Run 21 booted an earlier local build from this profile;
+it did **not** boot image 1 or image 2. Image 1 is superseded by image 2, and
+image 2 remains unbooted until it passes a fresh console run.
+
+[Workflow run 39481460775](https://github.com/gzimbric/ps5-linux-image/actions/runs/39481460775)
+completed successfully and created a private draft release. The draft has one
+image archive, `ps5-cachyos1160-k73.img.xz`, at 1,943,471,712 bytes with
+SHA-256
+`8b785243f79a32a4155cc1e39bed01d580e25ca514e88abbfed1a8a8157a281a`.
+It decompresses to the 12,582,912,000-byte raw image with SHA-256
+`3798c7dba96412c5301eb201d8bf8aa4edd1b2f80a743dfd7b90b2a79222c62d`.
+Those are verified build and release facts, not a hardware result; the release
+stays draft until this exact image boots on a console.
+
+The profile starts with the official CachyOS image and replaces its kernel
+with mainline v7.3 plus the exact PS5 patch set published by rmux (Armandas
+Kvietkus),
+[rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1)
+at `36f173f39e5e76c00c4e366a7b909f33bc665ad5`. That set includes rmux's PS5
+CPU and GPU frequency drivers. Image 2 does not substitute a different PS5
+kernel patch set. It adds a separate, hash-pinned IW620 Bluetooth quirk
+follow-up (`54d7addbb4cd95c943f9a4485229ac5516ad08ebe0f4aa02fd72cf33298fa0a2`)
+that restores the IW620 quirks-table entry and post-lookup interface-check
+ordering present in merged [ps5-linux patch-set PR #35](https://github.com/ps5-linux/ps5-linux-patches/pull/35)
+but absent from the pinned rmux 7.3 patch, while retaining rmux's 7.3 IW620
+quirk flags. It also changes the IW620 Wi-Fi startup order so firmware is
+copied before the driver's first probe. Those two image-2 changes still need
+hardware tests.
+
+[VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3)
+independently reports a paired DualSense on a CFI-10xx PS5 running firmware
+13.60 after the same core `btusb` correction. Its patch is not byte-identical
+to this one. That result supports the diagnosis, but it is not an 11.60
+hardware test of image 2, which remains unbooted.
+
+The frequency drivers are built as modules and remain manual-only. The image
+also ships the IW620 Wi-Fi driver built for this kernel, but no Wi-Fi
+firmware, holds the kernel package in pacman, and updates the boot files from
+a pacman hook. Steam's **Switch to Desktop** action and joining Wi-Fi from
+the KDE network menu both failed in Run 21 and are not fixed by image 2;
+manual session switching and `nmcli` remain the recorded workarounds. VCN
+initialized and displayed a picture in Run 21, but video decode was not
+tested.
+
+The boot files are not the exact sizes the earlier 11.60 loaders require, so
+the image needs a bounded 11.60 loader from
+[gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader)
+`main`: `make linux-1160-dma-e820-bounded-wifi` for Wi-Fi, or
+`make linux-1160-dma-e820-bounded`. The exact bounded Wi-Fi artifact that
+booted Run 21 was built at historical commit `98925a2`; current loader
+`main` reproduces its hash and adds build safeguards. The bounded build
+without the Wi-Fi dump remains unbooted. There is no published prebuilt
+bounded-loader release, and the similarly named
+`linux-1160-dma-e820-wifi` is not the bounded build. On Linux x86_64:
 
 ```bash
 ./scripts/build-linux-ps5-k73.sh
@@ -168,7 +218,16 @@ sudo ./scripts/build-cachyos1160-k73-image.sh
 sudo ./scripts/verify-cachyos1160-k73-image.sh --image output/ps5-cachyos1160-k73.img
 ```
 
-The [profile README](distros/cachyos1160-k73/README.md) lists the pins, the checks and every change. The [`CachyOS 7.3 11.60 image`](.github/workflows/cachyos1160-k73-image.yml) workflow runs these steps on GitHub-hosted runners and attaches one `ps5-cachyos1160-k73.img.xz` to a draft release. It runs when a tag matching `cachyos1160-k73-image-*` is pushed. A local pre-release image from this profile booted in Run 21; the CI build and the Bluetooth and Wi-Fi ordering fixes in this revision still need a hardware boot.
+The [profile README](distros/cachyos1160-k73/README.md) lists the pins, checks,
+changes, and remaining test gaps. The
+[`CachyOS 7.3 11.60 image`](.github/workflows/cachyos1160-k73-image.yml)
+workflow runs these steps on GitHub-hosted runners and attaches exactly one
+`ps5-cachyos1160-k73.img.xz` to a draft release. It never publishes split
+image parts: if the compressed image reaches the 2 GiB per-file limit, the
+workflow stops without creating a release. The workflow runs when a tag
+matching `cachyos1160-k73-image-*` is pushed. A successful workflow validates
+the build and image structure; it does not change image 2's unbooted hardware
+status.
 
 ## Prerequisites
 

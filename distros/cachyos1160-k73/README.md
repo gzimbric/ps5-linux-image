@@ -9,25 +9,88 @@ date.
 
 A local pre-release image from this profile booted on hardware in Run 21.
 Display, Ethernet, loader-supplied IW620 Wi-Fi and the frequency drivers all
-worked in that run. The CI-built image from this revision is still unbooted;
-its Bluetooth and Wi-Fi load-order fixes need a fresh hardware run.
+worked in that run. Run 21 did not boot either tagged CI image. The current
+image-2 candidate supersedes image 1 but is still unbooted; its Bluetooth and
+Wi-Fi load-order fixes need a fresh hardware run.
 
 The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
 (sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
 
-## Credit
+## Image 2 candidate
 
-The 7.3 kernel patch set is the work of rmux (Armandas Kvietkus):
+| Item | Value |
+|------|-------|
+| Source tag | `cachyos1160-k73-image-2` |
+| Source commit | `346088a48f66eb956dafdec9de5085e73b2d44a5` |
+| Kernel package | `linux-ps5 7.3.0-2` |
+| CI | [workflow 39481460775](https://github.com/gzimbric/ps5-linux-image/actions/runs/39481460775): success |
+| Release state | private draft |
+| Release image | one `ps5-cachyos1160-k73.img.xz`; 1,943,471,712 bytes; never split |
+| Compressed SHA-256 | `8b785243f79a32a4155cc1e39bed01d580e25ca514e88abbfed1a8a8157a281a` |
+| Raw image | 12,582,912,000 bytes; SHA-256 `3798c7dba96412c5301eb201d8bf8aa4edd1b2f80a743dfd7b90b2a79222c62d` |
+| Hardware status | unbooted |
+
+The downloaded draft assets, GitHub digests, `SHA256SUMS`, XZ stream and raw
+image hash were checked after the run. The release workflow aborts before
+creating a draft if the compressed image is 2 GiB or larger. A completed
+build, verifier pass, or draft release is software validation only; none of
+them is a console boot.
+
+Compared with the local image that booted in Run 21, image 2:
+
+- applies the hash-pinned IW620 Bluetooth quirk-ordering follow-up described
+  below and records the package revision as `7.3.0-2`;
+- blacklists `moal`'s automatic PCI-alias load, copies the console-supplied
+  firmware first, and then loads the driver explicitly; and
+- keeps the already-tested rmux kernel patch set, bounded-loader contract,
+  VCN setup, and manual frequency-driver policy unchanged.
+
+Neither image-2 fix has been tested on the console. Steam's **Switch to
+Desktop** action and joining Wi-Fi from the KDE network menu also remain
+unresolved; Run 21 used a manual session switch and `sudo nmcli`. Bluetooth
+must be retested with the internal controller, Wi-Fi must be tested from a
+cold boot, and the frequency drivers stay manual until a bounded thermal and
+stability run establishes a safe policy. VCN video decode, an independent
+storage read-back or integrity check, repeat boots, suspend, and broader
+hardware coverage are also outside the current evidence.
+
+## Patch provenance and credit
+
+The PS5 kernel baseline is the exact 7.3 patch set published by rmux
+(Armandas Kvietkus):
 [rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1),
-used as published at commit `36f173f`. It is the port of the ps5-linux PS5
-patches to Linux 7.3, plus rmux's CPU frequency (`ps5_cpufreq`) and GPU
-frequency (`ps5_gpufreq`) drivers. The build fetches the patch, its kernel
-config and the VCN firmware from that commit and checks each by SHA-256; none
-of it is copied into this repository, and the authorship in the patch and
-the drivers is unchanged. A local follow-up patch applies the IW620 Bluetooth
-quirk ordering used by ps5-linux patch-set PR #35; it is kept separate and
-hash-pinned in this repository.
+used as published at commit
+`36f173f39e5e76c00c4e366a7b909f33bc665ad5`. It is rmux's port of the
+ps5-linux PS5 patches to Linux 7.3, plus rmux's CPU frequency
+(`ps5_cpufreq`) and GPU frequency (`ps5_gpufreq`) drivers. The build fetches
+`linux.patch`, the kernel config and the VCN firmware from that commit and
+checks each by SHA-256; the pinned `linux.patch` hash is
+`b8a238b9973febbcf851053d99195bd7320bb0827c8ee5e4c54eba6b6f7cde3f`.
+It does not rewrite or replace rmux's patch set, and the authorship carried
+in the patch and drivers is unchanged.
+
+Image 2 then applies one separate kernel follow-up,
+[`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch), with
+SHA-256
+`54d7addbb4cd95c943f9a4485229ac5516ad08ebe0f4aa02fd72cf33298fa0a2`.
+It restores the IW620 `quirks_table` entry and post-lookup interface-check
+ordering present in merged [ps5-linux patch-set PR #35](https://github.com/ps5-linux/ps5-linux-patches/pull/35)
+but absent from the pinned rmux 7.3 patch, while retaining rmux's 7.3 IW620
+quirk flags. This is not part of rmux's pinned patch and has not yet been
+proven by a console boot.
+
+[VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3)
+independently reports a paired DualSense on a CFI-10xx PS5 running firmware
+13.60 after the same core `btusb` correction. Its patch is not byte-identical
+to this one. That result supports the diagnosis, but it is not an 11.60
+hardware test of image 2, which remains unbooted.
+
+The out-of-tree Wi-Fi modules are a separate driver build: it uses the four pinned
+ps5-linux/ps5-linux-mwifiex patches plus this profile's hash-pinned Linux 7.3
+compatibility patch (SHA-256
+`899b4b1cd83bf6b85074d3aff311bbc104723e118a327aa65f7326546c789304`).
+Those do not alter rmux's kernel patch set.
 
 ## Loader
 
@@ -36,9 +99,11 @@ require, so every one of them refuses this image. That includes the
 published DMA E820 loader (`firmware-11.60-dma-e820-run18`) and the
 `linux-1160-dma-e820-wifi` target, whose name is close to the Wi-Fi one
 below. This image needs a bounded build of the 11.60 loader from
-[gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader),
-branch `firmware-11.60-dma-e820` at commit `98925a2`. There is no prebuilt
-release of it yet, so build it from that commit:
+[gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader)
+`main`. The exact Run 21 artifacts were built at commit `98925a2`; current
+`main` reproduces their hashes and adds direct-target and CI safeguards. The
+prebuilt release remains a private draft, so public testers should build from
+`main`:
 
 | Target | ELF sha256 |
 |--------|------------|
@@ -47,8 +112,8 @@ release of it yet, so build it from that commit:
 
 The bounded Wi-Fi build, with the `e9fe6469…` hash above, booted Run 21 and
 supplied the console's Wi-Fi firmware. The non-Wi-Fi bounded build has not
-been booted on hardware yet. The CI image produced from this revision is also
-unbooted.
+been booted on hardware yet. Neither image 1 nor image 2 was the image used
+in Run 21, and image 2 is still unbooted.
 
 The bounded loader checks the files instead of their sizes:
 [`files/ps5-1160-check-boot-files`](files/ps5-1160-check-boot-files) runs
@@ -74,7 +139,9 @@ sudo ./scripts/verify-cachyos1160-k73-image.sh --image output/ps5-cachyos1160-k7
 The [`CachyOS 7.3 11.60 image`](../../.github/workflows/cachyos1160-k73-image.yml)
 workflow runs the same steps on GitHub-hosted runners, zeroes the free
 blocks of the root filesystem, runs the verifier again, compresses the image
-to one `.img.xz` and attaches it to a draft release.
+to one `.img.xz` and attaches it to a draft release. It never creates
+numbered parts. If the compressed file is 2 GiB or larger, the workflow fails
+before the release step.
 
 ### Kernel
 
@@ -118,9 +185,10 @@ runs with no network in `/build/nxp`, against the kernel tree in `/src`, with
 objtool on. It applies the four ps5-linux/ps5-linux-mwifiex `4aff908`
 patches the 7.1.7 Ubuntu Wi-Fi build also used (each checked by SHA-256) and
 [`kernel/ps5-iw620-kernel73-compat.patch`](kernel/ps5-iw620-kernel73-compat.patch),
-which adapts the driver to three changes in Linux 7.3; its header explains
-them. The build stops on any compiler, objtool or modpost warning, and checks
-`.return_sites`, the vermagic and the IW620 PCI alias.
+which adapts the driver to three changes in Linux 7.3 (SHA-256
+`899b4b1cd83bf6b85074d3aff311bbc104723e118a327aa65f7326546c789304`);
+its header explains them. The build stops on any compiler, objtool or modpost
+warning, and checks `.return_sites`, the vermagic and the IW620 PCI alias.
 
 [`scripts/package-linux-ps5-k73.sh`](../../scripts/package-linux-ps5-k73.sh)
 packages the kernel as `linux-ps5 7.3.0-2` for pacman, laid out like the
@@ -186,7 +254,7 @@ the loader, but `kexec.sh` is not expected to work with this kernel.
 ## If the display does not come up
 
 The local Run 21 image brought up the display with the VCN block enabled, but
-the CI-built image from this revision has not been booted yet. If VCN fails to
+video decode was not tested and image 2 has not been booted. If VCN fails to
 start, amdgpu can fail to probe. Ethernet and SSH do not depend on it, so they
 should still come up: SSH in and save
 `sudo dmesg` and the boot report. To boot without VCN, find

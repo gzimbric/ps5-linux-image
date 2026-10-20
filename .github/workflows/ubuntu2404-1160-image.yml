@@ -7,10 +7,11 @@ run-name: Ubuntu 24.04 11.60 image (${{ github.ref_name }})
 # xz-compressed image to a draft release. Nothing is public until the draft
 # is reviewed and published by hand.
 #
-# Release assets are capped at 2 GiB, so an .img.xz larger than 1900 MiB is
-# split into numbered parts. Release assets are used rather than workflow
-# artifacts because artifacts need a GitHub login to download and expire
-# after 90 days at most.
+# The image is always one .img.xz. If stronger compression cannot keep it
+# under GitHub's 2 GiB per-file limit, the job fails before creating a release
+# instead of publishing numbered parts. Release assets are used rather than
+# workflow artifacts because artifacts need a GitHub login to download and
+# expire after 90 days at most.
 
 on:
   workflow_dispatch:
@@ -44,7 +45,7 @@ jobs:
       # The kernel tree, rootfs volume, sparse raw image, Docker images and
       # compressed image peaked at about 13 GiB on the first CI build.
       MIN_FREE_GB: 30
-      SPLIT_MIB: 1900
+      MAX_RELEASE_BYTES: 2147483648
 
     steps:
       - name: Checkout
@@ -73,6 +74,7 @@ jobs:
 
       - name: Start disk sampler
         run: |
+          # shellcheck disable=SC2016 # the inner bash expands these at runtime
           nohup bash -c 'while true; do
             echo "$(date -u +%H:%M:%S) $(df -B1M --output=avail / | tail -n1 | tr -d " ")"
             sleep 20
@@ -145,21 +147,19 @@ jobs:
         run: |
           set -euo pipefail
           raw_sha=$(sha256sum "$IMAGE" | awk '{print $1}')
-          xz -T0 -6 -c "$IMAGE" > "$DIST/ps5-ubuntu2404.img.xz"
+          xz -T0 -9 -c "$IMAGE" > "$DIST/ps5-ubuntu2404.img.xz"
 
           cd "$DIST"
-          xz_sha=$(sha256sum ps5-ubuntu2404.img.xz | awk '{print $1}')
-          if [ "$(stat -c %s ps5-ubuntu2404.img.xz)" -gt $((SPLIT_MIB * 1024 * 1024)) ]; then
-            split --bytes="${SPLIT_MIB}M" --numeric-suffixes=1 --suffix-length=3 \
-              ps5-ubuntu2404.img.xz ps5-ubuntu2404.img.xz.
-            rm ps5-ubuntu2404.img.xz
-            files=(ps5-ubuntu2404.img.xz.[0-9][0-9][0-9])
-          else
-            files=(ps5-ubuntu2404.img.xz)
+          xz_size=$(stat -c %s ps5-ubuntu2404.img.xz)
+          echo "ps5-ubuntu2404.img.xz: $xz_size bytes (limit: under $MAX_RELEASE_BYTES)"
+          if [ "$xz_size" -ge "$MAX_RELEASE_BYTES" ]; then
+            echo "::error::ps5-ubuntu2404.img.xz is $xz_size bytes, over GitHub's 2 GiB per-file limit. The image must be made smaller; it is not split, and no release was created."
+            exit 1
           fi
+          xz_sha=$(sha256sum ps5-ubuntu2404.img.xz | awk '{print $1}')
 
           # What gets uploaded must decompress to the image that was verified.
-          roundtrip_sha=$(cat "${files[@]}" | xz -T0 -dc | sha256sum | awk '{print $1}')
+          roundtrip_sha=$(xz -T0 -dc ps5-ubuntu2404.img.xz | sha256sum | awk '{print $1}')
           if [ "$roundtrip_sha" != "$raw_sha" ]; then
             echo "::error::decompressed upload does not match the raw image"
             exit 1
@@ -168,9 +168,7 @@ jobs:
           {
             echo "$raw_sha  ps5-ubuntu2404.img"
             echo "$xz_sha  ps5-ubuntu2404.img.xz"
-            [ "${#files[@]}" -eq 1 ] || sha256sum "${files[@]}"
           } > SHA256SUMS
-          printf '%s\n' "${files[@]}" > upload-files.txt
           cat SHA256SUMS
           ls -l
 
@@ -229,17 +227,6 @@ jobs:
             exit 1
           fi
           cd "$DIST"
-          mapfile -t files < upload-files.txt
-          if [ "${#files[@]}" -eq 1 ]; then
-            download="Download \`ps5-ubuntu2404.img.xz\` and \`SHA256SUMS\` into one folder, then on Linux:"
-            join_cmd=""
-            windows=""
-          else
-            joined=$(printf '%s + ' "${files[@]}")
-            download="The compressed image is too big for one release file, so it is split into ${#files[@]} parts. Download every \`ps5-ubuntu2404.img.xz.NNN\` part and \`SHA256SUMS\` into one folder, then on Linux:"
-            join_cmd=$'sha256sum -c --ignore-missing SHA256SUMS\ncat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz\n'
-            windows=" On Windows, join the parts with \`copy /b ${joined% + } ps5-ubuntu2404.img.xz\`."
-          fi
 
           cat > release-notes.md <<EOF
           Test build of the Ubuntu 24.04 image for PS5 firmware 11.60, built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL).
@@ -252,14 +239,14 @@ jobs:
 
           ### Download and flash
 
-          $download
+          Download \`ps5-ubuntu2404.img.xz\` and \`SHA256SUMS\` into one folder, then on Linux:
 
           \`\`\`
-          ${join_cmd}sha256sum -c --ignore-missing SHA256SUMS
+          sha256sum -c --ignore-missing SHA256SUMS
           xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
           \`\`\`
 
-          On macOS, check with \`shasum -a 256 -c --ignore-missing SHA256SUMS\`.$windows balenaEtcher and Raspberry Pi Imager can flash \`ps5-ubuntu2404.img.xz\` directly.
+          On macOS, check with \`shasum -a 256 -c --ignore-missing SHA256SUMS\`. balenaEtcher and Raspberry Pi Imager can flash \`ps5-ubuntu2404.img.xz\` directly.
 
           The image is 16,777,216,000 bytes, which is larger than many 16 GB USB drives. Use a 32 GB drive or bigger. The root partition grows to fill the drive on first boot.
 
@@ -279,5 +266,5 @@ jobs:
           url=$(gh release create "$TAG" --draft --target "$GITHUB_SHA" \
             --title "Ubuntu 24.04 for PS5 firmware 11.60 ($TAG)" \
             --notes-file release-notes.md \
-            "${files[@]}" SHA256SUMS build-info.txt)
+            ps5-ubuntu2404.img.xz SHA256SUMS build-info.txt)
           echo "Draft release: $url" | tee -a "$GITHUB_STEP_SUMMARY"
