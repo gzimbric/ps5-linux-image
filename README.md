@@ -245,10 +245,19 @@ changes, and remaining test gaps. The
 workflow runs these steps on GitHub-hosted runners and attaches exactly one
 `ps5-cachyos1160-k73.img.xz` to a draft release. It never publishes split
 image parts: if the compressed image reaches the 2 GiB per-file limit, the
-workflow stops without creating a release. The workflow runs when a tag
-matching `cachyos1160-k73-image-*` is pushed. A successful workflow validates
-the build and image structure; it does not change image 2's unbooted hardware
-status.
+workflow stops without creating a release. The kernel package and IW620
+modules are cached under a fingerprint of every tracked kernel-build input.
+A `main` push that changes one of those inputs rebuilds and validates the
+bundle to prime the default-branch cache; a tag or manual image run accepts
+only that exact cache key and builds the kernel again on a miss. The cached
+handoff has its own SHA-256 manifest, which is checked after restore and again
+after transfer to the image job. There are no partial-key fallbacks. All
+compilation, image assembly, compression, and release uploading happens on
+GitHub's runners, so the machine that pushes the source does not relay the
+image. The full image workflow runs when a tag matching
+`cachyos1160-k73-image-*` is pushed or when it is started manually. A
+successful workflow validates the build and image structure; it does not
+change image 2's unbooted hardware status.
 
 ## Prerequisites
 
