@@ -7,10 +7,13 @@ run-name: Ubuntu 24.04 11.60 image (${{ github.ref_name }})
 # xz-compressed image to a draft release. Nothing is public until the draft
 # is reviewed and published by hand.
 #
-# Release assets are capped at 2 GiB, so an .img.xz larger than 1900 MiB is
-# split into numbered parts. Release assets are used rather than workflow
-# artifacts because artifacts need a GitHub login to download and expire
-# after 90 days at most.
+# Each release file has to be under 2 GiB, and every release is one .img.xz,
+# never split into parts. To keep it under the limit, the free blocks of the
+# ext4 root filesystem are zeroed before the verifiers run and the image is
+# compressed with xz -9. If the .img.xz is still 2 GiB or larger the job
+# fails and no release is created. Release assets are used rather than
+# workflow artifacts because artifacts need a GitHub login to download and
+# expire after 90 days at most.
 
 on:
   workflow_dispatch:
@@ -44,7 +47,8 @@ jobs:
       # The kernel tree, rootfs volume, sparse raw image, Docker images and
       # compressed image peaked at about 13 GiB on the first CI build.
       MIN_FREE_GB: 30
-      SPLIT_MIB: 1900
+      # GitHub rejects release files of 2 GiB or more.
+      MAX_RELEASE_FILE_BYTES: 2147483648
 
     steps:
       - name: Checkout
@@ -86,6 +90,47 @@ jobs:
           df -h /
           ./build_image.sh --distro ubuntu2404
           df -h /
+
+      - name: Zero free space in root filesystem
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq zerofree
+
+          loop=$(sudo losetup --find --show --partscan "$IMAGE")
+          trap 'sudo losetup --detach "$loop"' EXIT
+          sudo udevadm settle || true
+          lsblk --paths --output NAME,TYPE,SIZE "$loop"
+
+          # Find the root partition by its filesystem, and leave the FAT
+          # boot partition alone.
+          roots=()
+          while read -r nr; do
+            part=${loop}p$nr
+            for _ in $(seq 10); do [ -b "$part" ] && break; sleep 1; done
+            if [ ! -b "$part" ]; then
+              echo "::error::$part did not appear after attaching $IMAGE"
+              exit 1
+            fi
+            if [ "$(sudo blkid -p -s TYPE -o value "$part" || true)" = ext4 ]; then
+              roots+=("$part")
+            fi
+          done < <(sudo partx --noheadings --output NR --show "$loop")
+          if [ "${#roots[@]}" -ne 1 ]; then
+            echo "::error::expected one ext4 partition in $IMAGE, found ${#roots[@]}"
+            exit 1
+          fi
+          root=${roots[0]}
+          echo "Root filesystem: $root"
+
+          if ! sudo e2fsck -fn "$root"; then
+            echo "::error::e2fsck found problems on $root, not zeroing it"
+            exit 1
+          fi
+          sudo zerofree -v "$root"
+
+          trap - EXIT
+          sudo losetup --detach "$loop"
 
       - name: Verify kernel package
         run: |
@@ -145,32 +190,29 @@ jobs:
         run: |
           set -euo pipefail
           raw_sha=$(sha256sum "$IMAGE" | awk '{print $1}')
-          xz -T0 -6 -c "$IMAGE" > "$DIST/ps5-ubuntu2404.img.xz"
+          xz -T0 -9 -c "$IMAGE" > "$DIST/ps5-ubuntu2404.img.xz"
 
           cd "$DIST"
-          xz_sha=$(sha256sum ps5-ubuntu2404.img.xz | awk '{print $1}')
-          if [ "$(stat -c %s ps5-ubuntu2404.img.xz)" -gt $((SPLIT_MIB * 1024 * 1024)) ]; then
-            split --bytes="${SPLIT_MIB}M" --numeric-suffixes=1 --suffix-length=3 \
-              ps5-ubuntu2404.img.xz ps5-ubuntu2404.img.xz.
-            rm ps5-ubuntu2404.img.xz
-            files=(ps5-ubuntu2404.img.xz.[0-9][0-9][0-9])
-          else
-            files=(ps5-ubuntu2404.img.xz)
+          # Releases are one file. Fail here rather than split it.
+          xz_size=$(stat -c %s ps5-ubuntu2404.img.xz)
+          echo "ps5-ubuntu2404.img.xz: $xz_size bytes"
+          if [ "$xz_size" -ge "$MAX_RELEASE_FILE_BYTES" ]; then
+            echo "::error::ps5-ubuntu2404.img.xz is $xz_size bytes, over GitHub's 2 GiB per-file release limit (each file must be under $MAX_RELEASE_FILE_BYTES bytes). The image has to be made smaller before it can be released. No release was created."
+            exit 1
           fi
 
           # What gets uploaded must decompress to the image that was verified.
-          roundtrip_sha=$(cat "${files[@]}" | xz -T0 -dc | sha256sum | awk '{print $1}')
+          roundtrip_sha=$(xz -T0 -dc ps5-ubuntu2404.img.xz | sha256sum | awk '{print $1}')
           if [ "$roundtrip_sha" != "$raw_sha" ]; then
             echo "::error::decompressed upload does not match the raw image"
             exit 1
           fi
 
+          xz_sha=$(sha256sum ps5-ubuntu2404.img.xz | awk '{print $1}')
           {
             echo "$raw_sha  ps5-ubuntu2404.img"
             echo "$xz_sha  ps5-ubuntu2404.img.xz"
-            [ "${#files[@]}" -eq 1 ] || sha256sum "${files[@]}"
           } > SHA256SUMS
-          printf '%s\n' "${files[@]}" > upload-files.txt
           cat SHA256SUMS
           ls -l
 
@@ -232,18 +274,6 @@ jobs:
             exit 1
           fi
           cd "$DIST"
-          mapfile -t files < upload-files.txt
-          if [ "${#files[@]}" -eq 1 ]; then
-            download="Download \`ps5-ubuntu2404.img.xz\` and \`SHA256SUMS\` into one folder, then on Linux:"
-            join_cmd=""
-            windows=""
-          else
-            joined=$(printf '%s + ' "${files[@]}")
-            download="The compressed image is too big for one release file, so it is split into ${#files[@]} parts. Download every \`ps5-ubuntu2404.img.xz.NNN\` part and \`SHA256SUMS\` into one folder, then on Linux:"
-            join_cmd=$'sha256sum -c --ignore-missing SHA256SUMS\ncat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz\n'
-            windows=" On Windows, join the parts with \`copy /b ${joined% + } ps5-ubuntu2404.img.xz\`."
-          fi
-
           cat > release-notes.md <<EOF
           Test build of the Ubuntu 24.04 image for PS5 firmware 11.60, built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL).
 
@@ -257,14 +287,14 @@ jobs:
 
           ### Download and flash
 
-          $download
+          Download \`ps5-ubuntu2404.img.xz\` and \`SHA256SUMS\` into one folder, then on Linux:
 
           \`\`\`
-          ${join_cmd}sha256sum -c --ignore-missing SHA256SUMS
+          sha256sum -c --ignore-missing SHA256SUMS
           xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
           \`\`\`
 
-          On macOS, check with \`shasum -a 256 -c --ignore-missing SHA256SUMS\`.$windows balenaEtcher and Raspberry Pi Imager can flash \`ps5-ubuntu2404.img.xz\` directly.
+          On macOS, check with \`shasum -a 256 -c --ignore-missing SHA256SUMS\`. balenaEtcher and Raspberry Pi Imager can flash \`ps5-ubuntu2404.img.xz\` directly.
 
           The image is 16,777,216,000 bytes, which is larger than many 16 GB USB drives. Use a 32 GB drive or bigger. The root partition grows to fill the drive on first boot.
 
@@ -284,5 +314,5 @@ jobs:
           url=$(gh release create "$TAG" --draft --target "$GITHUB_SHA" \
             --title "Ubuntu 24.04 for PS5 firmware 11.60 ($TAG)" \
             --notes-file release-notes.md \
-            "${files[@]}" SHA256SUMS build-info.txt)
+            ps5-ubuntu2404.img.xz SHA256SUMS build-info.txt)
           echo "Draft release: $url" | tee -a "$GITHUB_STEP_SUMMARY"

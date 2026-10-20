@@ -34,15 +34,7 @@ xz -dc ps5-ubuntu2404.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fs
 
 On macOS, check with `shasum -a 256 -c --ignore-missing SHA256SUMS` and flash to `/dev/rdiskN`. balenaEtcher and Raspberry Pi Imager can flash the `.img.xz` without unpacking it first. To check the decompressed image itself, compare `xz -dc ps5-ubuntu2404.img.xz | sha256sum` with the `ps5-ubuntu2404.img` line in `SHA256SUMS`.
 
-GitHub caps release files at 2 GiB. If a build's `.img.xz` is larger than 1,900 MiB, the release has numbered parts (`ps5-ubuntu2404.img.xz.001`, `.002`, ...) instead of one file. Download every part, then check and join them before flashing:
-
-```bash
-sha256sum -c --ignore-missing SHA256SUMS
-cat ps5-ubuntu2404.img.xz.[0-9][0-9][0-9] > ps5-ubuntu2404.img.xz
-sha256sum -c --ignore-missing SHA256SUMS
-```
-
-On Windows, join the parts with `copy /b ps5-ubuntu2404.img.xz.001 + ps5-ubuntu2404.img.xz.002 ps5-ubuntu2404.img.xz`, adding a `+` for each further part.
+GitHub caps release files at 2 GiB, and every release is a single `.img.xz`. The workflow zeroes the free space in the root filesystem before the verifiers run, then compresses with `xz -9`. If the `.img.xz` still comes out at 2 GiB or more, the build fails and no release is made.
 
 The image is 16,777,216,000 bytes, which is more than many 16 GB USB drives hold. Use a 32 GB or larger drive. The root partition grows to fill the drive on first boot. The firmware 11.60 loader is not part of the image or the release.
 
