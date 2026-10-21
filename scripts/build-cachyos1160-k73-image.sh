@@ -480,6 +480,15 @@ pullins=$(find "$R/etc/systemd/system" "$R/usr/lib/systemd/system" \
 [[ -z $pullins ]] || die "ps5-stage-firmware is still installed: $pullins"
 echo "ok  mlan.ko and moal.ko in /$updates/ps5-iw620, loaded by ps5-iw620-firmware, not by udev"
 
+log "Network online policy"
+# The pinned base enables systemd-networkd-wait-online even though this image
+# uses NetworkManager for both Ethernet and Wi-Fi. Its first-boot preset creates
+# the enable link after the raw image is built. On the exact public Image 3 run,
+# that redundant unit timed out after two minutes and became the only failed
+# unit while both links were already usable. Mask it before first boot so the
+# preset cannot enable it. No wait-online service is needed by the tty launcher.
+add_link /dev/null etc/systemd/system/systemd-networkd-wait-online.service
+
 log "Bluetooth helper"
 # ps5-bt-quiet came with the 7.1.7 package and is enabled in the base image.
 # The 7.3.0 package has no /etc or /usr/local files, so put it back as it was.

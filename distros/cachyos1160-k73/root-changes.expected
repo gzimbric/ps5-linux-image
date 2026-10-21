@@ -42,6 +42,7 @@ A etc/systemd/system/ps5fan.service f 0644 0 0 471 659eaf4c7190b0c8527abfe83aab4
 A etc/systemd/system/sleep.target l 0777 0 0 - /dev/null
 A etc/systemd/system/suspend-then-hibernate.target l 0777 0 0 - /dev/null
 A etc/systemd/system/suspend.target l 0777 0 0 - /dev/null
+A etc/systemd/system/systemd-networkd-wait-online.service l 0777 0 0 - /dev/null
 A etc/systemd/system/timers.target.wants d 0755 0 0 - -
 A etc/systemd/system/timers.target.wants/ps5-boot-report.timer l 0777 0 0 - /etc/systemd/system/ps5-boot-report.timer
 M home/steam/.config/ps5-next-session f 0644 1000 1000 8 e1eb72e080d8498fb7988921455ab4e66cc25cefd4b1a802446ed9e798e18b8b

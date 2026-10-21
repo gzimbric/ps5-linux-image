@@ -192,6 +192,18 @@ expected_nm_actions=$(printf '%s\n' \
   die "the NetworkManager polkit rule has an unexpected authorization result"
 ok "live-tested NetworkManager polkit rule is limited to steam and nine desktop actions"
 
+# The base's first-boot preset enables networkd's wait-online unit even though
+# NetworkManager owns the usable links. It timed out on the exact Image 3
+# hardware run and delayed/soiled an otherwise healthy boot. The mask must be
+# present in the raw image so first-boot preset application cannot enable it.
+networkd_wait=$R/etc/systemd/system/systemd-networkd-wait-online.service
+[[ -L $networkd_wait && $(readlink -- "$networkd_wait") == /dev/null ]] ||
+  die "systemd-networkd-wait-online is not masked"
+networkd_wait_enable=$R/etc/systemd/system/network-online.target.wants/systemd-networkd-wait-online.service
+[[ ! -e $networkd_wait_enable && ! -L $networkd_wait_enable ]] ||
+  die "systemd-networkd-wait-online still has an enable link"
+ok "redundant systemd-networkd-wait-online unit masked before first boot"
+
 # --------------------------------------------------------------- Bluetooth
 
 # Match the userspace half of the working Bazzite Deck v1.0.3 path. The
