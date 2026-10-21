@@ -6,12 +6,14 @@
 #
 # Mechanism
 #   Root    : write ~/.config/ps5-next-session to "plasma" or "gamescope"
-#   Non-root: sudo to write the token, then end / restart the session.
+#   Non-root: sudo to write the token, then hand control back to the tty
+#             launcher by ending Gamescope or stopping Plasma's user targets.
 #
 # Direction notes
-#   Both directions set the next-session token, then terminate the current tty1
-#   session. agetty autologin respawns it and the profile.d launcher reads the
-#   token before starting Gamescope or Plasma.
+#   Gamescope -> Plasma terminates the current tty1 session, so agetty respawns
+#   it and the profile.d launcher reads the Plasma token. Plasma -> Gamescope
+#   stops the graphical session target; startplasma returns to that tty launcher,
+#   which reads the already-written Gamescope token.
 #
 # Optional: write `plasmax11` to ~/.config/ps5-next-session for an X11 escape
 # hatch via startx + startplasma-x11 (ps5-tty-session.sh).
@@ -29,8 +31,11 @@ if [[ $EUID -eq 0 ]]; then
         gamescope)
             next="gamescope"
             ;;
-        desktop|plasma|plasma-wayland|plasmax11)
+        desktop|plasma|plasma-wayland)
             next="plasma"
+            ;;
+        plasmax11)
+            next="plasmax11"
             ;;
         *)
             echo >&2 "steamos-session-select: unrecognised session '$session'"
@@ -71,14 +76,14 @@ case "$session" in
     gamescope)
         # Plasma's compositor + shell run under systemd --user (session 2),
         # not the tty1 login session — terminate-session alone leaves them
-        # holding DRM and gamescope can't grab the display. Kill them first,
-        # then close the tty1 session so profile.d exec's gamescope-session-ps5.
-        pkill -u steam plasmashell || true
-        pkill -u steam kwin_wayland || true
-        pkill -u steam kwin_x11 || true
-        pkill -u steam Xwayland || true
-        if [[ -n "${XDG_SESSION_ID:-}" ]]; then
-            loginctl terminate-session "$XDG_SESSION_ID"
+        # holding DRM and gamescope can't grab the display. This Plasma build
+        # attaches KWin and plasmashell to graphical-session.target; stopping
+        # that owner tears both down as one transaction. When startplasma
+        # returns, the existing tty launcher starts Gamescope. Do not kill
+        # processes afterward: they may already belong to the new session.
+        if ! systemctl --user stop graphical-session.target; then
+            echo >&2 "steamos-session-select: could not stop the graphical session"
+            exit 1
         fi
         ;;
     desktop|plasma|plasma-wayland|plasmax11)

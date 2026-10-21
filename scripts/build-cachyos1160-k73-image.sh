@@ -69,6 +69,8 @@ OLD_FAT_BZIMAGE_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee3
 BT_QUIET_SHA256=d31222ead065ee2ab6fd55edda285741814bb8a470c9c26d355963ab39b46240
 BT_QUIET_SERVICE_SHA256=4cc7b16adbc3ef4d4a132d55e7e0bacd4e9bc9192096507d6e125301d821f32c
 OLD_SESSION_SELECT_SHA256=f6fb96619489228225ccbc2d7f782d5791c5a2e6d9f66f5d0f843d64d35d1f74
+OLD_GAMESCOPE_SESSION_SHA256=5b50d084becac615c8a27670f79d99d7aa9bbbfcd40ba50e3903005e493cb85a
+OLD_NEXT_SESSION_SHA256=df84d3e62a7e09d6ec7a9f6bb3f2f2060eed95618c315ac0ea2f6d62efd91b0e
 
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PROFILE=$REPO/distros/cachyos1160-k73
@@ -143,7 +145,7 @@ done
 [[ $(uname -m) == x86_64 ]] || die "run on x86_64 (or in a linux/amd64 container)"
 
 required=(awk blkid chroot cmp dd diff e2fsck find fsck.fat gcc install join
-  unshare losetup mount mountpoint nproc od partx python3 readelf realpath sed
+  unshare losetup mount mountpoint nproc od partx readelf realpath sed
   sha256sum sort stat umount xargs xz)
 [[ -n $base_xz ]] || required+=(curl)
 for cmd in "${required[@]}"; do
@@ -168,7 +170,6 @@ for f in README.md cmdline.txt root-changes.expected config/ps5-amdgpu.conf \
   files/ps5-boot-report.timer files/ps5_fan_max.c files/ps5fan.service \
   files/ps5-iw620.conf files/ps5-iw620-firmware files/ps5-iw620-firmware.service \
   files/20-ps5-iw620.conf files/ps5-performance files/ps5-performance.service \
-  files/ps5-session-switch-listener files/ps5-session-switch-listener.service \
   files/ps5-bt-quiet files/ps5-bt-quiet.service \
   files/ps5-1160-check-boot-files files/ps5-update-boot-files \
   files/05-ps5-boot-files-precheck.hook files/95-ps5-boot-files.hook; do
@@ -176,14 +177,14 @@ for f in README.md cmdline.txt root-changes.expected config/ps5-amdgpu.conf \
 done
 [[ -f $REPO/distros/cachyos/files/steamos-session-select ]] ||
   die "profile file missing: distros/cachyos/files/steamos-session-select"
+[[ -f $REPO/distros/cachyos/files/gamescope-session-ps5 ]] ||
+  die "profile file missing: distros/cachyos/files/gamescope-session-ps5"
 expect_file "$PROFILE/cmdline.txt" "${FAT_SIZE[cmdline.txt]}" \
   "${FAT_SHA256[cmdline.txt]}" "profile cmdline.txt"
 ! grep -q nokaslr "$PROFILE/cmdline.txt" || die "cmdline.txt must not contain nokaslr"
 expect_sha "$PROFILE/files/ps5-bt-quiet" "$BT_QUIET_SHA256" "profile ps5-bt-quiet"
 expect_sha "$PROFILE/files/ps5-bt-quiet.service" "$BT_QUIET_SERVICE_SHA256" \
   "profile ps5-bt-quiet.service"
-PYTHONDONTWRITEBYTECODE=1 \
-  python3 "$PROFILE/files/ps5-session-switch-listener" --self-test
 
 mkdir -p -- "$work" "$out_dir"
 R=$work/root   # root filesystem, mounted read-write for the chroot
@@ -581,19 +582,25 @@ add_link /etc/systemd/system/ps5-amdgpu-reprobe.service \
 
 log "TTY session switching"
 # The base image has the tty-session marker and starts Gaming Mode on tty1.
-# Replace only the known helper, then add a narrow listener for Steam's exact
-# SwitchToUser desktop request. Gaming Mode remains the default session.
+# Image 3 starts once in Plasma so Wi-Fi can be configured before Steam's
+# first Gaming Mode bootstrap. The launcher returns to Gaming Mode after that
+# desktop session. Steam's -steamos mode then uses the existing legacy selector
+# path for Power > Switch to Desktop; that exact route passed on the console.
 [[ -f $R/etc/ps5-use-tty-sessions ]] || die "/etc/ps5-use-tty-sessions is missing"
-[[ $(cat "$R/home/steam/.config/ps5-next-session") == gamescope ]] ||
-  die "the base image does not default to Gaming Mode"
+next_session=$R/home/steam/.config/ps5-next-session
+expect_sha "$next_session" "$OLD_NEXT_SESSION_SHA256" \
+  "/home/steam/.config/ps5-next-session before replacement"
+[[ $(stat -c '%a %u %g' -- "$next_session") == '644 1000 1000' ]] ||
+  die "/home/steam/.config/ps5-next-session has unexpected mode or owner"
+install -o 1000 -g 1000 -m 0644 /dev/null "$next_session.new"
+printf 'desktop\n' >"$next_session.new"
+mv -f -- "$next_session.new" "$next_session"
+[[ $(sha "$next_session") == e1eb72e080d8498fb7988921455ab4e66cc25cefd4b1a802446ed9e798e18b8b ]] ||
+  die "could not set the first session to Plasma"
 replace_file 0755 "$REPO/distros/cachyos/files/steamos-session-select" \
   usr/bin/steamos-session-select "$OLD_SESSION_SELECT_SHA256"
-add_file 0755 "$PROFILE/files/ps5-session-switch-listener" \
-  usr/local/sbin/ps5-session-switch-listener
-add_file 0644 "$PROFILE/files/ps5-session-switch-listener.service" \
-  etc/systemd/system/ps5-session-switch-listener.service
-add_link /etc/systemd/system/ps5-session-switch-listener.service \
-  etc/systemd/system/multi-user.target.wants/ps5-session-switch-listener.service
+replace_file 0755 "$REPO/distros/cachyos/files/gamescope-session-ps5" \
+  usr/bin/gamescope-session-ps5 "$OLD_GAMESCOPE_SESSION_SHA256"
 
 log "Disable unsupported Linux sleep targets"
 for target in sleep suspend hibernate hybrid-sleep suspend-then-hibernate; do
@@ -612,7 +619,6 @@ in_root systemd-analyze verify \
   /etc/systemd/system/ps5fan.service \
   /etc/systemd/system/ps5-amdgpu-reprobe.service \
   /etc/systemd/system/ps5-performance.service \
-  /etc/systemd/system/ps5-session-switch-listener.service \
   /etc/systemd/system/ps5-iw620-firmware.service \
   /etc/systemd/system/ps5-bt-quiet.service \
   /etc/systemd/system/ps5-boot-report.service \

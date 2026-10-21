@@ -202,11 +202,17 @@ unknown revision, so its dynamic table does not apply. Pattern 3 is the
 safest bring-up request presently available, not a calibrated temperature
 curve, and physical RPM has not been measured.
 
-Gaming Mode remains the default. Image 3 adds a tightly scoped system-bus
-listener for Steam's display-manager request; it selects Plasma and ends only
-the `steam` session on `tty1`, reproducing the manual handoff that worked in
-Run 21. This still needs an exact-image console test. On image 2, recover from
-a stuck **Switch to Desktop** from SSH or another TTY with:
+Image 3 opens Plasma on first boot so Wi-Fi can be configured before Steam's
+one-time Gaming Mode bootstrap, which needs internet access. Plasma resets the
+one-shot token to Gaming Mode when the desktop session ends. Gaming Mode now
+launches Steam with `-steamos -gamepadui`. On the 11.60 test console this made
+Steam use its own legacy session-selector path: **Switch to Desktop** invoked
+`steamos-session-select plasma` and reached Plasma twice without a custom
+SteamOS Manager service. `-steamos3` remains disabled because this is not an
+atomic SteamOS installation. Returning to Gaming Mode stops Plasma's owning
+`graphical-session.target`; the tty launcher then starts Gamescope with no
+overlapping compositor. The exact hosted Image 3 artifact still needs a console test. On image 2,
+recover from a stuck **Switch to Desktop** from SSH or another TTY with:
 
 ```bash
 sudo steamos-session-select plasma

@@ -283,7 +283,6 @@ scrub() {
         NetworkManager.service bluetooth.service sshd.service getty@tty1.service \
         first-boot.service ps5fan.service ps5-amdgpu-reprobe.service \
         ps5-iw620-firmware.service ps5-bt-quiet.service ps5-performance.service \
-        ps5-session-switch-listener.service \
         ps5-boot-report.timer 2>&1 || true
     systemctl --no-pager --full --failed 2>&1 || true
     systemctl --no-pager --full list-jobs 2>&1 || true

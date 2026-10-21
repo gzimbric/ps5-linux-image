@@ -50,8 +50,6 @@ done
 ((EUID == 0)) || die "run as root"
 image=$(realpath -e -- "$image")
 kernel_dir=$(realpath -e -- "$kernel_dir")
-PYTHONDONTWRITEBYTECODE=1 \
-  python3 "$PROFILE/files/ps5-session-switch-listener" --self-test
 
 [[ $(stat -c %s -- "$image") == "$IMAGE_SIZE" ]] || die "image is not $IMAGE_SIZE bytes"
 layout=$(partx -g -o NR,START,SECTORS -- "$image" | awk '{ print $1, $2, $3 }')
@@ -154,9 +152,14 @@ blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(moal|mlan)([[:s
 firmware=$(find "$R" "$B" -xdev -name 'pcieuartiw620*' -print)
 [[ -z $firmware ]] || die "IW620 firmware in the image: $firmware"
 same "$R/usr/local/sbin/ps5-iw620-firmware" "$PROFILE/files/ps5-iw620-firmware" "ps5-iw620-firmware"
-grep -qx 'wifi.powersave=2' "$R/etc/NetworkManager/conf.d/20-ps5-iw620.conf" ||
-  die "NetworkManager Wi-Fi power saving is not disabled"
-ok "IW620 driver installed, udev alias load blocked, no firmware, NetworkManager power saving disabled"
+for setting in \
+  'wifi.scan-rand-mac-address=no' \
+  'wifi.powersave=2' \
+  'wifi.cloned-mac-address=permanent'; do
+  grep -qx "$setting" "$R/etc/NetworkManager/conf.d/20-ps5-iw620.conf" ||
+    die "NetworkManager IW620 setting is missing: $setting"
+done
+ok "IW620 driver installed, udev alias load blocked, no firmware, stable MAC and power settings applied"
 
 # --------------------------------------------------------------- Bluetooth
 
@@ -228,7 +231,6 @@ w=$R/etc/systemd/system
 for link in multi-user.target.wants/ps5fan.service \
   multi-user.target.wants/ps5-amdgpu-reprobe.service \
   multi-user.target.wants/ps5-performance.service \
-  multi-user.target.wants/ps5-session-switch-listener.service \
   multi-user.target.wants/ps5-iw620-firmware.service \
   multi-user.target.wants/ps5-bt-quiet.service \
   multi-user.target.wants/sshd.service \
@@ -247,38 +249,54 @@ for f in ps5-boot-report ps5-amdgpu-reprobe ps5-1160-check-boot-files ps5-update
   same "$R/usr/local/sbin/$f" "$PROFILE/files/$f" "/usr/local/sbin/$f"
 done
 for f in ps5fan ps5-amdgpu-reprobe ps5-performance \
-  ps5-session-switch-listener ps5-iw620-firmware ps5-bt-quiet \
+  ps5-iw620-firmware ps5-bt-quiet \
   ps5-boot-report; do
   same "$R/etc/systemd/system/$f.service" "$PROFILE/files/$f.service" \
     "/etc/systemd/system/$f.service"
 done
 same "$R/etc/systemd/system/ps5-boot-report.timer" \
   "$PROFILE/files/ps5-boot-report.timer" "/etc/systemd/system/ps5-boot-report.timer"
-same "$R/usr/local/sbin/ps5-session-switch-listener" \
-  "$PROFILE/files/ps5-session-switch-listener" "/usr/local/sbin/ps5-session-switch-listener"
-same "$R/etc/systemd/system/ps5-session-switch-listener.service" \
-  "$PROFILE/files/ps5-session-switch-listener.service" "/etc/systemd/system/ps5-session-switch-listener.service"
+for old in \
+  etc/systemd/system/ps5-session-switch-listener.service \
+  etc/systemd/system/multi-user.target.wants/ps5-session-switch-listener.service \
+  usr/local/sbin/ps5-session-switch-listener \
+  usr/lib/systemd/user/default.target.wants/ps5-steamos-session-manager.service \
+  usr/lib/systemd/user/ps5-steamos-session-manager.service \
+  usr/local/sbin/ps5-steamos-session-manager \
+  usr/share/dbus-1/services/com.steampowered.SteamOSManager1.service; do
+  [[ ! -e $R/$old && ! -L $R/$old ]] || die "obsolete /$old is installed"
+done
 same "$R/usr/bin/steamos-session-select" "$REPO/distros/cachyos/files/steamos-session-select" \
   "/usr/bin/steamos-session-select"
+same "$R/usr/bin/gamescope-session-ps5" "$REPO/distros/cachyos/files/gamescope-session-ps5" \
+  "/usr/bin/gamescope-session-ps5"
+grep -qF '/usr/bin/steam -steamos -gamepadui' "$R/usr/bin/gamescope-session-ps5" ||
+  die "gamescope-session-ps5 does not enable SteamOS session integration"
+! grep -qE '/usr/bin/steam .*-(steamos3|steamdeck)([[:space:]]|$)' \
+  "$R/usr/bin/gamescope-session-ps5" ||
+  die "gamescope-session-ps5 enables an unsupported SteamOS 3 identity flag"
+grep -qF 'systemctl --user stop graphical-session.target' \
+  "$R/usr/bin/steamos-session-select" ||
+  die "steamos-session-select does not stop Plasma's graphical session target"
+grep -qF 'next="plasmax11"' "$R/usr/bin/steamos-session-select" ||
+  die "steamos-session-select cannot select the documented X11 escape hatch"
 [[ -f $R/etc/ps5-use-tty-sessions ]] || die "tty-session marker missing"
-[[ $(cat "$R/home/steam/.config/ps5-next-session") == gamescope ]] ||
-  die "the image does not default to Gaming Mode"
+[[ $(cat "$R/home/steam/.config/ps5-next-session") == desktop ]] ||
+  die "the image does not open Plasma on first boot"
+[[ $(stat -c '%a %u %g' -- "$R/home/steam/.config/ps5-next-session") == \
+   '644 1000 1000' ]] || die "the first-session token has the wrong mode or owner"
 [[ -x $R/usr/local/sbin/ps5_fan_max && -x $R/usr/local/sbin/grow-rootfs ]] ||
   die "ps5_fan_max or grow-rootfs is missing"
-unshare --net chroot "$R" /usr/bin/env -i \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/bin LC_ALL=C PYTHONDONTWRITEBYTECODE=1 \
-  /usr/local/sbin/ps5-session-switch-listener --self-test
 unshare --net chroot "$R" /usr/bin/env -i PATH=/usr/bin LC_ALL=C \
   systemd-analyze verify \
     /etc/systemd/system/ps5fan.service \
     /etc/systemd/system/ps5-amdgpu-reprobe.service \
     /etc/systemd/system/ps5-performance.service \
-    /etc/systemd/system/ps5-session-switch-listener.service \
     /etc/systemd/system/ps5-iw620-firmware.service \
     /etc/systemd/system/ps5-bt-quiet.service \
     /etc/systemd/system/ps5-boot-report.service \
     /etc/systemd/system/ps5-boot-report.timer
-ok "fan, display re-detect, clocks, session switch, Wi-Fi, Bluetooth, SSH and boot report enabled; Linux sleep masked"
+ok "fan, display re-detect, clocks, session selector, Wi-Fi, Bluetooth, SSH and boot report enabled; Linux sleep masked"
 
 # ------------------------------------------------------- kernel hold, hook
 

@@ -20,6 +20,8 @@ export LIBSEAT_BACKEND=logind
 export WLR_LIBINPUT_NO_DEVICES=1
 
 # Launch flags:
+#   -steamos    : enable the distro-neutral SteamOS session integration used
+#                 by gamescope-session without enabling SteamOS 3 OS updates
 #   -gamepadui  : controller-friendly Steam UI (Big Picture-like)
 #   NOT -steamos3 : would enable SteamOS atomic-OS-update polling. CachyOS is
 #                   pacman-rolling, no atomupd manifest server, so Steam loops
@@ -32,4 +34,4 @@ exec /usr/bin/gamescope \
     --prefer-output DP-1 \
     --sdr-gamut-wideness 0 \
     -- \
-    /usr/bin/steam -gamepadui
+    /usr/bin/steam -steamos -gamepadui

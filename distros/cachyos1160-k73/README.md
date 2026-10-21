@@ -77,8 +77,10 @@ Mode as a recovery step; fully power off before another loader run.
 
 ## Image 3 source candidate
 
-Image 3 keeps Gaming Mode as the default but integrates the parts that were
-manual in Run 21:
+Image 3 opens Plasma on the first boot so Wi-Fi can be configured before
+Steam's one-time bootstrap, then uses Gaming Mode as the normal default. The
+first Gaming Mode launch needs internet access. It also integrates the parts
+that were manual in Run 21:
 
 - **Wi-Fi:** pins `ps5-linux/ps5-linux-mwifiex` commit
   `4bce848dd098bf74fbafd0078463da3d9f0d7f80`, including its current HE
@@ -109,10 +111,13 @@ manual in Run 21:
   restore the clocks. To opt out, create an empty
   `/boot/efi/disable-ps5-performance` file and fully power off before the next
   boot.
-- **Desktop handoff:** a constrained system-bus listener accepts the expected
-  display-manager request, selects Plasma, and terminates only the `steam`
-  session on `tty1`. This automates the known-good manual transition without
-  changing the default from Gaming Mode.
+- **Desktop handoff:** launches Gaming Mode as
+  `steam -steamos -gamepadui`. On the 11.60 test console Steam then used its
+  built-in legacy path and invoked `steamos-session-select plasma`; two
+  consecutive attempts reached Plasma. No custom SteamOS Manager service is
+  installed. Return to Gaming Mode stops `graphical-session.target`, the
+  systemd owner of KWin and plasmashell on this image, before the tty launcher
+  resumes into Gamescope.
 - **Sleep:** Linux sleep, suspend, hibernate, hybrid sleep and
   suspend-then-hibernate targets are masked. GameOS Rest Mode and wake remain
   only the carrier used to launch the loader. Once Linux is running, shut down
@@ -361,8 +366,11 @@ cachyos1160 changes carry over: hostname `ps5` (the base image has no
 the first-boot marker, the GPU firmware and `ps5-amdgpu.conf`, the fan
 helper, display re-detect, the boot report, and `mts` for Ethernet. The
 official image's `grow-rootfs`, `sshd` with password login, and `steam`
-autologin into Gaming Mode remain in place. Image 3 replaces only the session
-selection helper needed for the bounded `tty1` handoff described below.
+autologin on `tty1` remain in place. Image 3 changes the initial session token
+to Plasma, replaces the session-selection helper needed for the bounded
+handoff, and replaces the Gamescope launcher so Steam starts with the tested
+`-steamos -gamepadui` flags. Plasma resets the one-shot token to Gaming Mode
+when it exits.
 
 What is different:
 
@@ -386,10 +394,13 @@ What is different:
   IW620 (PCI `1b4b:2b56`), the service does nothing, `moal` is never loaded
   and Ethernet is unaffected. The firmware helper started as the Ubuntu
   24.04 profile's; here it loads the driver itself instead of reloading it
-  after udev. `/etc/NetworkManager/conf.d/20-ps5-iw620.conf` sets
-  `wifi.powersave=2`; the module options keep `auto_fw_reload=0`. Those reduce
-  exposure to known failure paths but do not prove that the KDE network menu
-  can join every access point.
+  after udev. `/etc/NetworkManager/conf.d/20-ps5-iw620.conf` disables scan MAC
+  randomization, keeps the adapter on its permanent address and sets
+  `wifi.powersave=2`; the module options keep `auto_fw_reload=0`. On the tested
+  CFI-1115B, this stopped KDE from selecting an access-point object that the
+  IW620 scan cycle had already invalidated. A WPA3-SAE network then joined from
+  the normal Plasma menu, obtained DHCP and completed an HTTPS request over
+  Wi-Fi.
 - **Bluetooth.** The kernel applies the exact, hash-pinned Bazzite Deck v1.0.3
   source patch after rmux's patch set. It makes the IW620 quirks win over
   btusb's earlier generic class match and applies the IW620 interface
@@ -417,11 +428,19 @@ What is different:
   rollback because unloading does not restore the clocks. Create an empty
   `/boot/efi/disable-ps5-performance` file and fully power off to skip the
   startup policy on the next boot.
-- **Desktop handoff.** Gaming Mode remains the default. The
-  `ps5-session-switch-listener` service watches only the expected system-bus
-  display-manager request, writes the validated Plasma session token and
-  terminates only the `steam` session on `tty1`. It is the automated form of
-  the manual Run 21 handoff, not yet an exact-image result.
+- **Desktop handoff.** First boot opens Plasma so the tester can configure a
+  network; Steam's first Gaming Mode bootstrap needs that connection. After
+  that one-shot desktop session, Gaming Mode is the default. The Gamescope
+  launcher starts `steam -steamos -gamepadui`; it deliberately does not use
+  `-steamos3`, which would enable atomic-OS update behavior that CachyOS cannot
+  provide. On the 11.60 test console, Steam logged that no supported SteamOS
+  Manager was present, selected its built-in legacy path, ran
+  `steamos-session-select plasma`, and reached Plasma twice. The image does not
+  install a partial SteamOS Manager replacement. On return to Gaming Mode the
+  selector stops `graphical-session.target`, the systemd owner of KWin and
+  plasmashell on this image, then the existing tty launcher resumes into
+  Gamescope without a later process kill that could hit the new session. The
+  exact hosted Image 3 artifact still needs the same round-trip test.
 - **Sleep.** `sleep.target`, `suspend.target`, `hibernate.target`,
   `hybrid-sleep.target` and `suspend-then-hibernate.target` are masked because
   Linux suspend is unsupported. GameOS Rest Mode and wake remain the loader's

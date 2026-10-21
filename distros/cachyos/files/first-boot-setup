@@ -99,7 +99,7 @@ main() {
     touch /etc/ps5-first-boot-done
 
     dialog --clear --msgbox \
-        "Setup complete.\n\nYou will log in on tty1 (Steam Gaming Mode).\n\nDesktop: Steam > Power > Switch to KDE\nReturn: double-click the desktop shortcut." \
+        "Setup complete.\n\nThe first tty1 session opens the CachyOS desktop so you can configure networking. Gaming Mode is the normal default afterward.\n\nDesktop: Steam > Power > Switch to Desktop\nReturn: double-click the desktop shortcut." \
         14 62
 }
 

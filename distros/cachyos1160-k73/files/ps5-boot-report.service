@@ -1,6 +1,6 @@
 [Unit]
 Description=Capture a bounded PS5 boot report
-After=local-fs.target NetworkManager.service sshd.service ps5fan.service ps5-amdgpu-reprobe.service ps5-iw620-firmware.service ps5-performance.service ps5-session-switch-listener.service
+After=local-fs.target NetworkManager.service sshd.service ps5fan.service ps5-amdgpu-reprobe.service ps5-iw620-firmware.service ps5-performance.service
 
 [Service]
 Type=oneshot
