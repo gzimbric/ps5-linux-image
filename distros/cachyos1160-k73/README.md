@@ -160,6 +160,8 @@ that were manual in Run 21:
   `systemd-networkd-wait-online.service` enabled even though NetworkManager owns
   the network. Its two-minute timeout is a stale service, not an IW620 or
   Ethernet failure; the tester guide includes the published-image cleanup.
+  Current next-image source masks that unit before first boot so systemd's
+  first-boot preset cannot recreate its enablement.
 - **Bluetooth:** replaces the image-2 follow-up with the exact
   `ps5-btusb-quirks-fix.patch` asset from Bazzite Deck v1.0.3, pinned at
   SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.

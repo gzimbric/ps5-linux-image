@@ -188,8 +188,9 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 - Published Image 3 also leaves `systemd-networkd-wait-online` enabled even
   though NetworkManager owns the network. Its two-minute timeout was the only
   failed unit and did not interrupt networking or SSH. The tester guide removes
-  the unused enablement and clears the failed state; that cleanup is not part
-  of the published hash.
+  the unused enablement and clears the failed state. Current next-image source
+  masks the unit before first boot so the vendor preset cannot enable it; that
+  correction is not part of the published hash.
 - Linux sleep and hibernate are disabled. Fully shut Linux down between loader
   attempts.
 
