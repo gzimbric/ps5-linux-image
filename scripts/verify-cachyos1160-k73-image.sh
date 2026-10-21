@@ -183,7 +183,7 @@ for alias in "${MT7921E_ALIASES[@]}"; do
     die "modules.alias has no mt7921e entry for $alias"
 done
 in_root modinfo -k "$KVER" -F parm mt7921e |
-  grep -qxF 'disable_aspm:disable PCI ASPM support' ||
+  grep -qxF 'disable_aspm:disable PCI ASPM support (bool)' ||
   die "mt7921e does not expose the expected disable_aspm parameter"
 actual=$(in_root modinfo -k "$KVER" -F firmware mt7921e | sort)
 expected=$(printf '%s\n' "${MT7921E_FIRMWARE[@]}" | sort)

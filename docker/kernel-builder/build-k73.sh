@@ -175,7 +175,7 @@ mt_aliases=(
 actual=$(modinfo -F alias "$mt7921e" | sort)
 expected=$(printf '%s\n' "${mt_aliases[@]}" | sort)
 test "$actual" = "$expected" || die "unexpected mt7921e PCI aliases"
-modinfo -F parm "$mt7921e" | grep -qxF 'disable_aspm:disable PCI ASPM support' ||
+modinfo -F parm "$mt7921e" | grep -qxF 'disable_aspm:disable PCI ASPM support (bool)' ||
   die "mt7921e does not expose the expected disable_aspm parameter"
 mt_firmware=(
   mediatek/WIFI_MT7902_patch_mcu_1_1_hdr.bin
