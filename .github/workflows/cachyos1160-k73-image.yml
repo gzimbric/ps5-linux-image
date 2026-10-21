@@ -34,6 +34,10 @@ on:
         description: 'Fetch the 7.3 patch set from this git URL (a mirror) instead of rmuxnet/ps5-linux-patches-1. It must still have the pinned commit, and the files are still checked by SHA-256.'
         type: string
         default: ''
+      kernel_run_id:
+        description: 'Optional successful kernel job run ID to reuse. Its source inputs and downloaded bundle are verified before use.'
+        type: string
+        default: ''
   push:
     # Prime the exact kernel-bundle cache on the default branch whenever one
     # of its inputs changes. The image job below is skipped for these pushes.
@@ -53,6 +57,7 @@ on:
       - 'distros/cachyos1160-k73/kernel/**'
       - 'distros/cachyos1160-k73/files/ps5-1160-check-boot-files'
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -126,7 +131,84 @@ jobs:
             ${{ env.KERNEL_DIR }}/kernel-cache-manifest.sha256
           key: ${{ steps.kernel-inputs.outputs.key }}
 
+      - name: Check reused kernel run
+        id: reused-kernel
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id != ''
+        uses: actions/github-script@v8
+        env:
+          KERNEL_RUN_ID: ${{ inputs.kernel_run_id }}
+        with:
+          script: |
+            const text = process.env.KERNEL_RUN_ID;
+            if (!/^[1-9][0-9]*$/.test(text)) {
+              core.setFailed(`invalid kernel_run_id: ${text}`);
+              return;
+            }
+            const runId = Number(text);
+            if (!Number.isSafeInteger(runId)) {
+              core.setFailed(`kernel_run_id is outside the safe integer range: ${text}`);
+              return;
+            }
+            const { owner, repo } = context.repo;
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: runId,
+            });
+            if (run.path !== '.github/workflows/cachyos1160-k73-image.yml' ||
+                run.event !== 'workflow_dispatch' || run.status !== 'completed') {
+              core.setFailed(`run ${runId} is not a completed manual run of this workflow`);
+              return;
+            }
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { owner, repo, run_id: runId, per_page: 100 },
+            );
+            const kernel = jobs.find(job => job.name === 'kernel');
+            if (!kernel || kernel.conclusion !== 'success') {
+              core.setFailed(`run ${runId} has no successful kernel job`);
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              { owner, repo, run_id: runId, per_page: 100 },
+            );
+            const matches = artifacts.filter(
+              artifact => artifact.name === 'linux-ps5-k73' && !artifact.expired,
+            );
+            if (matches.length !== 1) {
+              core.setFailed(`run ${runId} has ${matches.length} usable linux-ps5-k73 artifacts`);
+              return;
+            }
+            core.setOutput('head_sha', run.head_sha);
+            core.notice(`Reusing kernel artifact ${matches[0].id} from run ${runId} at ${run.head_sha}`);
+
+      - name: Match reused kernel inputs
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id != ''
+        env:
+          DONOR_SHA: ${{ steps.reused-kernel.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$DONOR_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags --depth=1 origin "$DONOR_SHA"
+          donor_inputs="$RUNNER_TEMP/kernel-inputs-donor.txt"
+          : > "$donor_inputs"
+          while read -r input_path _; do
+            donor_object=$(git rev-parse "$DONOR_SHA:$input_path")
+            printf '%s %s\n' "$input_path" "$donor_object" >> "$donor_inputs"
+          done < "$RUNNER_TEMP/kernel-inputs.txt"
+          diff -u "$RUNNER_TEMP/kernel-inputs.txt" "$donor_inputs"
+
+      - name: Download reused kernel bundle
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id != ''
+        uses: actions/download-artifact@v6
+        with:
+          name: linux-ps5-k73
+          path: ${{ env.KERNEL_DIR }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.kernel_run_id }}
+
       - name: Check disk space
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
         run: |
           set -euo pipefail
           free_gb() { df -B1G --output=avail / | tail -n1 | tr -d ' '; }
@@ -148,14 +230,14 @@ jobs:
           fi
 
       - name: Install packaging tools
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libarchive-tools zstd
 
       - name: Build kernel and Wi-Fi modules
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
         env:
           PATCHES_REPO_INPUT: ${{ inputs.patches_repo }}
         run: |
@@ -167,11 +249,11 @@ jobs:
           ./scripts/build-linux-ps5-k73.sh --out "$KERNEL_DIR" "${patches_args[@]}"
 
       - name: Package linux-ps5
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
         run: sudo ./scripts/package-linux-ps5-k73.sh --kernel-dir "$KERNEL_DIR"
 
       - name: Record kernel bundle manifest
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
         run: |
           set -euo pipefail
           cd "$KERNEL_DIR"
