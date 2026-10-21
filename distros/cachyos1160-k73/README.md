@@ -280,8 +280,7 @@ Those files are not present in the published Image 3 identity above.
 
 ## Patch provenance and credit
 
-The PS5 kernel baseline is the exact 7.3 patch set published by rmux
-(Armandas Kvietkus):
+The PS5 kernel baseline is the exact 7.3 patch set published by rmux:
 [rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1),
 used as published at commit
 `36f173f39e5e76c00c4e366a7b909f33bc665ad5`. It is rmux's port of the

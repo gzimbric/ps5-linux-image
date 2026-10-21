@@ -608,7 +608,7 @@ jobs:
           - The boot report (\`ps5-boot-report.txt\` on the boot partition) records Bluetooth controller and module identity, temperatures, CPU/GPU clocks, the performance opt-out, session state and sleep masks. It replaces Wi-Fi network names with \`<wifi-name>\` and masks MAC addresses, but still contains IP addresses. Review and redact it and any \`dmesg\` output before posting; do not upload raw firmware, keys, the FAT partition, or unsanitized logs.
           - pacman holds \`linux-ps5\` back from updates. After a kernel or initramfs change, which an ordinary \`pacman -Syu\` can also make, a pacman hook builds a new initramfs, checks it, and updates \`bzImage\` and \`initrd.img\` on the boot partition if they pass the loader's checks. The pair it replaces is kept there as \`bzImage.prev\` and \`initrd.img.prev\`. pacman refuses a kernel change while the boot partition is not mounted read-write.
 
-          Thanks to rmux (Armandas Kvietkus) for the 7.3 port and the frequency drivers.
+          Thanks to rmux for the 7.3 port and the frequency drivers.
 
           ### Loader
 

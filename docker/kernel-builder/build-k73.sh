@@ -12,7 +12,7 @@
 #   /src                 an empty Docker volume for the kernel tree
 #   /out                 output directory
 #
-# The patch set is the 7.3 port by rmux (Armandas Kvietkus) in
+# The patch set is the 7.3 port by rmux in
 # rmuxnet/ps5-linux-patches-1. A byte-for-byte, hash-pinned follow-up from the
 # ps5-bazzite-deck v1.0.3 release makes the IW620 Bluetooth quirks in that port
 # take effect. The config changes made here build the two PS5 frequency

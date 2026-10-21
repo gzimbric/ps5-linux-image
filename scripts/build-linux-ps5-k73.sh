@@ -9,7 +9,7 @@
 # then turns the result into the linux-ps5 pacman package.
 #
 # The kernel patch set is the 7.3 port with the PS5 CPU and GPU frequency
-# drivers by rmux (Armandas Kvietkus), rmuxnet/ps5-linux-patches-1, fetched at
+# drivers by rmux, rmuxnet/ps5-linux-patches-1, fetched at
 # the pinned commit. The builder then applies the exact, hash-pinned IW620
 # Bluetooth source patch published with ps5-bazzite-deck v1.0.3.
 #
