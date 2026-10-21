@@ -11,14 +11,20 @@ Display, Ethernet, loader-supplied IW620 Wi-Fi and the frequency drivers all
 worked in that run. Later live tests on the same system passed Plasma Wi-Fi
 joining, internal-Bluetooth DualSense pairing, and the complete Gaming Mode →
 Desktop → Gaming Mode handoff. The public Image 3 prerelease contains those
-changes, but its exact hosted image has not been booted. Keep the local and
-hosted results separate when reporting tests.
+changes. Its exact hosted image has now completed one identity-verified cold
+boot on the same CFI-1115B running firmware 11.60. HDMI, wired SSH, Plasma
+Wi-Fi, internal-Bluetooth DualSense input and both directions of the session
+handoff passed. Keep that result separate from the earlier local image when
+reporting tests.
 
 > **Tester warning:** The current download is the public
 > [Image 3 prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-3).
-> Its hosted build and structural checks passed, but that exact raw image has
-> not booted on a console. This profile is only for retail PS5 firmware 11.60
-> and requires the
+> Its hosted build and structural checks passed, followed by one successful
+> exact-image boot on a CFI-1115B. This remains a prerelease with repeated-boot,
+> cold-reconnect, coexistence-soak and longer thermal/stability testing still
+> open. A 20-second bounded CPU load passed, but it did not establish thermal
+> equilibrium. This
+> profile is only for retail PS5 firmware 11.60 and requires the
 > [bounded 11.60 loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
 > Use the bounded Wi-Fi ELF and follow the
 > [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md).
@@ -31,6 +37,12 @@ hosted results separate when reporting tests.
 > the legacy servo-pattern `3` helper. Current `main` replaces it with a
 > read-back-verified 65 C autoservo target for the next image. The source-tree
 > correction is not present in the published Image 3 hash.
+
+> **Wait-online identity:** the published archive also leaves
+> `systemd-networkd-wait-online.service` enabled even though NetworkManager owns
+> networking. Its two-minute timeout was the only failed unit and did not
+> interrupt networking or SSH. Use the tester guide's published-image cleanup;
+> the current next-image source removes the stale enablement.
 
 The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
@@ -52,12 +64,13 @@ built on 2026-08-29 from upstream commit `52db0a4`
 | `cmdline.txt` | 118 bytes; SHA-256 `aec7a85e9ebcf36e4bdaeb89242b898e17817acd40c16db57a3bb9c3117b1da8` |
 | `vram.txt` | 11 bytes; SHA-256 `bc4642feb06a4cc6d10d5865e321efaad7ab3f3f1d5d025151b79978164310a0` |
 | `kexec.sh` | 136 bytes; SHA-256 `0f26e09911a8a2bc9912d7c77fee6ac09ccd18a820086cb103be92de081b6c52` |
-| Hardware status | Exact hosted artifact unbooted |
+| Hardware status | One identity-verified cold boot on a CFI-1115B running 11.60; HDMI, wired SSH, Plasma Wi-Fi, internal-Bluetooth DualSense input, both session directions and a short bounded CPU load passed |
 
 The downloaded archive, GitHub digest, checksum manifest and XZ round trip
-were checked. Only a boot of raw image SHA-256 `25a0ef68…` closes the hosted
-artifact's hardware gate. The local Run 21 image and its later live changes
-are supporting evidence, not a substitute for that test.
+were checked. The flashed device readback matched raw image SHA-256
+`25a0ef68…`, and the running console matched all five published boot-file
+identities. That closes the first exact-artifact boot gate. The local Run 21
+image and its later live changes remain separate supporting evidence.
 
 For comparison, the local hardware-test image was built from
 `f7d6fbd9d630cddaceb83f3b861869d4453af8ca`; its 12,582,912,000-byte raw
@@ -68,8 +81,8 @@ The final live-tested session files were the 1,866-byte
 and the 3,736-byte `steamos-session-select`
 (`1d099eeacc19bbf575e5a636fc81087a46f72af64390172e437372b493bde1c1`).
 The public image contains those session-file identities and the same boot-file
-identities listed above, but its different raw-image hash still requires a
-separate cold-boot result.
+identities listed above. Its separate exact-image cold-boot result is recorded
+in the tester guide linked below.
 
 ## Previous Image 2 reference
 
@@ -129,11 +142,17 @@ that were manual in Run 21:
   capability and transmit-path fixes, while retaining this profile's Linux
   7.3 compatibility patch. The driver keeps `auto_fw_reload=0`, and
   NetworkManager disables scan MAC randomization, keeps the permanent address
-  and sets `wifi.powersave=2`. That configuration passed a WPA3 join, DHCP and
-  an HTTPS request from Plasma on the local 11.60 system. The exact hosted
-  Image 3 modules still need their own console test, and
+  and sets `wifi.powersave=2`. That configuration passed a Plasma GUI join,
+  DHCP and traffic explicitly bound to Wi-Fi on the exact hosted Image 3. The
   `sudo nmcli --ask device wifi connect <wifi-name>` remains the fallback if
-  the KDE network menu does not join.
+  the KDE network menu does not join. After Gaming Mode returned to Plasma,
+  Polkit evaluated KDE's returned helpers outside the active seat and showed
+  **System policy prevents control of network connections**. The tester guide's
+  targeted action allowlist restored unprivileged Wi-Fi rescans; it is a live
+  hotfix, not a file in the published Image 3 hash. The base image also leaves
+  `systemd-networkd-wait-online.service` enabled even though NetworkManager owns
+  the network. Its two-minute timeout is a stale service, not an IW620 or
+  Ethernet failure; the tester guide includes the published-image cleanup.
 - **Bluetooth:** replaces the image-2 follow-up with the exact
   `ps5-btusb-quirks-fix.patch` asset from Bazzite Deck v1.0.3, pinned at
   SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.
@@ -141,10 +160,11 @@ that were manual in Run 21:
   `btusb.ko`. The image also selects the working Bazzite BlueZ path:
   `AlwaysPairable=true`, `JustWorksRepairing=always`, `UserspaceHID=true`,
   and explicit pairing timeout, controller mode, privacy and auto-enable
-  values. A DualSense paired, bonded, trusted and connected through the
-  internal adapter on the local 11.60 system, with no USB controller present.
-  The exact hosted image still needs its own pairing result and a long
-  Wi-Fi/Bluetooth coexistence test.
+  values. On the exact hosted image a DualSense was discovered through the
+  internal adapter, paired, bonded, trusted, automatically reconnected and
+  exposed controller, motion and touchpad input through `hid-playstation`,
+  with no USB controller present. A cold-boot reconnect and long
+  Wi-Fi/Bluetooth coexistence test remain open.
 - **Fan:** published Image 3 requests legacy servo pattern `3`; on the tested
   console that left the autoservo target at 86 C and did not prove maximum
   speed. The next-build source on `main` instead sets 65 C before the
@@ -171,12 +191,15 @@ that were manual in Run 21:
   only the carrier used to launch the loader. Once Linux is running, shut down
   fully between test boots.
 
-Image 3 remains a prerelease until its exact hosted-CI archive completes at
-least three to five cold boots, DualSense pairing, a 60-minute concurrent
-Wi-Fi and Bluetooth run, and a bounded thermal load. KDE Wi-Fi joining,
-automatic session handoff, startup frequency policy, physical fan response,
-VCN video decode, storage integrity and broader hardware coverage remain test
-gaps until recorded otherwise. The
+Image 3 remains a prerelease. Its exact hosted-CI archive has completed one of
+the requested three to five cold boots, plus Plasma Wi-Fi joining, DualSense
+pairing/input, startup frequency policy and both directions of the automatic
+session handoff. With the per-boot 65 C fan-target hotfix active, a 20-second,
+16-worker CPU load held the CPU near 3.19 GHz, peaked at 47 C and returned to
+37 C three seconds after the load ended. Cold-boot reconnect, a 60-minute
+concurrent Wi-Fi and Bluetooth run, a longer thermal/stability run,
+performance opt-out, VCN video decode, storage integrity and broader hardware
+coverage remain open. The
 [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md)
 contains the exact release hashes, boot steps and result checklist.
 
@@ -191,9 +214,13 @@ cat /sys/bus/platform/devices/ps5-fan/target_temp
 ```
 
 The kernel's automatic controller remains active. Use 40-80 C; lower values
-cool more aggressively. On the tested CFI-1115B, a bounded 20 C diagnostic
-demand made the fan clearly audible and reduced Tctl from 35.75 C to about
-33 C in 28 seconds. Linux exposes no chassis-fan RPM/tachometer value.
+cool more aggressively. On the tested CFI-1115B, a separate fan-response check
+made the fan clearly audible and reduced Tctl from 35.75 C to about 33 C in 28
+seconds. A later 20-second, 16-worker CPU load with the 65 C target and
+`schedutil` active held the CPU near 3.19 GHz, peaked at 47 C and returned to
+37 C three seconds after the load ended. That short check passed, but it does
+not establish thermal equilibrium or long-duration stability. Linux exposes no
+chassis-fan RPM/tachometer value.
 
 Current `main` makes the 65 C policy persistent for the next image through
 `/etc/default/ps5-fan`, verifies immediate readback, removes the misleading
@@ -418,9 +445,9 @@ the loader, but `kexec.sh` is not expected to work with this kernel.
 
 ## If the display does not come up
 
-The local Run 21 image brought up the display with the VCN block enabled, but
-video decode was not tested and the exact published Image 3 artifact does not
-yet have a hardware result. If VCN fails to start, amdgpu can fail to probe.
+The exact published Image 3 artifact has now brought up the display once with
+the VCN block enabled. Video decode was not tested. If VCN fails to start on a
+later console or display, amdgpu can fail to probe.
 Ethernet and SSH do not depend on it, so they should still come up: SSH in and
 save
 `sudo dmesg` and the boot report. To boot without VCN, find
@@ -482,14 +509,17 @@ What is different:
   Bazzite image. `/etc/bluetooth/input.conf` explicitly keeps
   `UserspaceHID=true`; `uhid` and `hid-playstation` are built for this kernel.
   This path passed with a DualSense on the local 11.60 system. The exact
-  hosted image still needs its own pairing result.
+  hosted image then independently passed discovery, BlueZ pairing through
+  `bluetoothctl`, bonding, trust, automatic reconnect, `hid-playstation`
+  registration and raw
+  input capture. Cold-boot reconnect and a long coexistence run remain open.
 - **Fan.** `ps5fan.service` is enabled and runs before the performance service.
   It leaves the ICC's automatic thermal controller active, sets its target to
   65 C and checks the value by reading the kernel interface back. To choose a
   different balance, edit `PS5_FAN_TARGET_C` in `/etc/default/ps5-fan` (40-80
   C) and restart `ps5fan.service`; lower values cool more aggressively. The
-  tested CFI-1115B accepted target changes and audibly ramped during a bounded
-  20 C diagnostic demand test. Linux exposes temperature and target data here, but no
+  tested CFI-1115B accepted target changes and audibly ramped during a separate
+  fan-response check. Linux exposes temperature and target data here, but no
   chassis-fan RPM/tachometer reading.
 - **Frequency drivers.** `ps5-cpufreq.ko` and `ps5-gpufreq.ko` are part of
   the kernel package but remain absent from the initramfs and generic
@@ -497,9 +527,12 @@ What is different:
   service succeeds. It requires `amdgpu dpm=0`, loads the GPU module before
   the CPU module, verifies GPU governor `simple_ondemand` and CPU governor
   `schedutil`, and disables CPU boost. Both were exercised manually in Run
-  21, but the 84 C peak occurred before thermal equilibrium; automatic startup
-  remains experimental pending a bounded load test. Do not use `rmmod` as a
-  rollback because unloading does not restore the clocks. Create an empty
+  21, but the 84 C peak occurred before thermal equilibrium. On the exact
+  public Image 3 artifact, automatic startup passed a 20-second, 16-worker CPU
+  load after the fan target was corrected to 65 C: the CPU stayed near 3.19 GHz
+  and peaked at 47 C. That is a bounded diagnostic, not a thermal-equilibrium or
+  long-duration stability result. Do not use `rmmod` as a rollback because
+  unloading does not restore the clocks. Create an empty
   `/boot/efi/disable-ps5-performance` file and fully power off to skip the
   startup policy on the next boot.
 - **Desktop handoff.** First boot opens Plasma so the tester can configure a
@@ -516,8 +549,12 @@ What is different:
   Gamescope without a later process kill that could hit the new session.
   **Switch to Desktop may take a few seconds:** one clean pass took about 2.4
   seconds and an earlier cleanup-heavy pass took about 27 seconds. Wait before
-  clicking it again. The exact hosted Image 3 artifact still needs the same
-  round-trip test.
+  clicking it again. The exact hosted Image 3 artifact passed both directions
+  of the round trip: the first Gaming Mode launch installed Steam's client
+  update before showing the SteamOS interface, then **Switch to Desktop**
+  returned to KWin and Plasma without compositor overlap. The handoff passed,
+  but the returned desktop needs the published-image Polkit hotfix described in
+  the tester guide before KDE can control NetworkManager normally.
 - **Sleep.** `sleep.target`, `suspend.target`, `hibernate.target`,
   `hybrid-sleep.target` and `suspend-then-hibernate.target` are masked because
   Linux suspend is unsupported. GameOS Rest Mode and wake remain the loader's

@@ -154,10 +154,14 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 ## CachyOS 7.3 for 11.60
 
 > **Image 3 is a public tester prerelease for retail PS5 firmware 11.60.**
-> The hosted build and structural checks passed, but this exact downloadable
-> image has not yet been booted on a console. A local image and the final live
-> follow-up changes did pass on the 11.60 test console; those results must not
-> be reported as a boot of the hosted artifact.
+> The hosted build and structural checks passed. The exact downloadable image
+> has now completed one identity-verified cold boot on a CFI-1115B running
+> firmware 11.60, with visible HDMI and authenticated wired SSH. Wi-Fi,
+> internal-Bluetooth DualSense input and both directions of the Plasma/Gaming
+> Mode handoff also passed during that boot. A 20-second bounded CPU load also
+> passed after applying the documented 65 C fan-target hotfix. Repeated boots,
+> cold reconnect, coexistence soak and longer thermal/stability testing remain
+> open.
 
 ### Start here
 
@@ -176,6 +180,16 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 - **Switch to Desktop is not instant.** A clean local pass took about 2.4
   seconds; an earlier cleanup-heavy pass took about 27 seconds. Wait before
   clicking again or power-cycling.
+- After the exact-image return to Plasma, KDE displayed **System policy
+  prevents control of network connections**. The
+  [tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md#network-control-after-switching-sessions)
+  includes the targeted `steam`/NetworkManager Polkit hotfix. It is not part of
+  the published Image 3 hash.
+- Published Image 3 also leaves `systemd-networkd-wait-online` enabled even
+  though NetworkManager owns the network. Its two-minute timeout was the only
+  failed unit and did not interrupt networking or SSH. The tester guide removes
+  the unused enablement and clears the failed state; that cleanup is not part
+  of the published hash.
 - Linux sleep and hibernate are disabled. Fully shut Linux down between loader
   attempts.
 
@@ -213,13 +227,24 @@ removes the legacy helper, applies 65 C at boot, checks the controller readback
 and records the target in the boot report. That change is **not** part of the
 published Image 3 archive or hashes.
 
-The local 11.60 follow-up passed Plasma Wi-Fi joining, internal-Bluetooth
-DualSense pairing, and the Gaming Mode → Desktop → Gaming Mode round trip.
-The frequency drivers had already worked when loaded manually. The post-release
-fan hotfix produced an audible ramp and a temperature drop on the local console,
-but RPM is not exposed. A bounded thermal load, video decode, long
-Bluetooth/Wi-Fi coexistence, and a cold boot of the exact hosted image remain
-open tests. To skip the
+The exact hosted image has now passed one cold boot on the 11.60 test console.
+All five boot files matched the release identities, the root filesystem grew to
+fill the 248 GB test drive, Plasma joined Wi-Fi and passed traffic bound to that
+interface, the internal Bluetooth controller paired and automatically
+reconnected a DualSense, and the full Plasma → Gaming Mode → Plasma handoff
+passed without compositor overlap. The returned Plasma session then needed the
+tester guide's live Polkit hotfix before KDE could control NetworkManager; the
+current next-image source carries that correction. The startup frequency policy
+also reached GPU `simple_ondemand`, CPU `schedutil` and CPU boost off. With the 65 C fan
+hotfix active, a 20-second, 16-worker CPU load held the CPU near 3.19 GHz,
+peaked at 47 C and returned to 37 C three seconds after the load ended. This is
+still one boot and not thermal-equilibrium or long-duration stability evidence:
+cold-boot Wi-Fi and Bluetooth reconnect, a long coexistence run, a longer
+thermal/stability run, performance opt-out, storage integrity and video decode
+remain open. The
+published fan service still left the target at 86 C; the documented per-boot
+hotfix changed its readback to 65 C for this session, but RPM is not exposed and
+the persistent `main` correction is not in the archive. To skip the
 experimental startup clock policy, create an empty
 `/boot/efi/disable-ps5-performance` file and fully power off before the next
 boot. Do not unload the frequency modules as a rollback; unloading does not
@@ -237,7 +262,7 @@ restore the clocks.
 | `bzImage` | 11,613,184 bytes, SHA-256 `945a4f2a03c4771313e466dccfb8272e0345cf7d143516a36a0bc75b2b219d0a` |
 | `initrd.img` | 51,899,412 bytes, SHA-256 `912600c22a203a744d4d44fcd4b5caacd86ea8b0c3ef8202ed9c0ff2ba146dd0` |
 | Other boot files | `cmdline.txt` `aec7a85e9ebcf36e4bdaeb89242b898e17817acd40c16db57a3bb9c3117b1da8`; `vram.txt` `bc4642feb06a4cc6d10d5865e321efaad7ab3f3f1d5d025151b79978164310a0`; `kexec.sh` `0f26e09911a8a2bc9912d7c77fee6ac09ccd18a820086cb103be92de081b6c52` |
-| Hardware status | Exact hosted artifact unbooted |
+| Hardware status | One identity-verified cold boot on a CFI-1115B running 11.60; HDMI, wired SSH, Plasma Wi-Fi, internal-Bluetooth DualSense input, the Plasma/Gaming Mode round trip and a short bounded CPU load passed; broader prerelease gates remain open |
 
 The archive is one file, never numbered parts. Verify `SHA256SUMS` before
 flashing. The bounded Wi-Fi loader copies the console's own IW620 firmware to
