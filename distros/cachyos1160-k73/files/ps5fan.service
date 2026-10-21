@@ -1,14 +1,15 @@
 [Unit]
-Description=Request the maximum PS5 fan servo pattern for bring-up testing
+Description=Set the PS5 fan autoservo temperature target
 After=systemd-udev-trigger.service
 Before=ps5-performance.service getty@tty1.service
 
 [Service]
 Type=oneshot
-ExecStartPre=/usr/bin/timeout 30 /bin/sh -c 'while [ ! -c /dev/icc ]; do sleep 1; done'
-ExecStart=/usr/local/sbin/ps5_fan_max
+EnvironmentFile=-/etc/default/ps5-fan
+ExecStartPre=/usr/bin/timeout 30 /bin/sh -c 'while [ ! -w /sys/bus/platform/devices/ps5-fan/target_temp ]; do sleep 1; done'
+ExecStart=/usr/local/sbin/ps5-fan-target
 RemainAfterExit=yes
-TimeoutStartSec=35
+TimeoutStartSec=65
 TimeoutStopSec=5
 
 [Install]

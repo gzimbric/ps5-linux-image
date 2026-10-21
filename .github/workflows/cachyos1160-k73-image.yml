@@ -290,7 +290,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            binutils curl dosfstools e2fsprogs gcc libc6-dev mount util-linux \
+            binutils curl dosfstools e2fsprogs mount util-linux \
             xz-utils zerofree zstd
 
       - name: Download kernel
@@ -439,7 +439,6 @@ jobs:
           set -euo pipefail
           base_xz_sha=$(sed -n 's/^BASE_XZ_SHA256=//p' scripts/build-cachyos1160-k73-image.sh)
           changes=$OUT/cachyos1160-k73-root-changes.txt
-          fan=$(awk '$2 == "usr/local/sbin/ps5_fan_max" { print $7 " bytes, sha256 " $8 }' "$changes")
           n_changes=$(grep -vc '^#' "$changes")
           swap=$(sed -n '2s/^# //p' "$OUT/cachyos1160-k73-kernel-swap.txt")
           min_free=$(awk '{print $2}' "$RUNNER_TEMP/disk-free-mb.log" | sort -n | head -n1)
@@ -452,7 +451,7 @@ jobs:
             echo "Base image:  ps5-cachyos.img.xz, sha256 $base_xz_sha"
             echo "             (ps5-linux/ps5-linux-image release built 2026-08-29 from 52db0a4)"
             echo "Raw image:   $(stat -c %s "$IMAGE") bytes"
-            echo "Fan helper:  ps5_fan_max, $fan (gcc $(gcc -dumpfullversion))"
+            echo "Fan policy:  ICC autoservo target 65 C with immediate readback"
             echo "Root changes: $n_changes paths outside the kernel package, listed in cachyos1160-k73-root-changes.txt"
             echo "Kernel swap: $swap"
             echo "Lowest free disk on / during the build: ${min_free} MiB"
@@ -509,14 +508,14 @@ jobs:
           cd "$DIST"
 
           cat > release-notes.md <<EOF
-          **Public Image 3 tester prerelease for retail PS5 firmware 11.60 only. This exact CI-built image has not been booted on hardware.** A local prerelease image from this profile booted in Run 21, but it was not this artifact. Follow the [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md), use the recommended bounded Wi-Fi ELF from the [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21), and fully power off instead of using Linux sleep or Rest Mode between attempts.
+          **Public CachyOS 7.3 tester prerelease for retail PS5 firmware 11.60 only. This exact CI-built image has not been booted on hardware.** A local prerelease image from this profile booted in Run 21, but it was not this artifact. Read the [source-matched CachyOS 7.3 profile notes](https://github.com/gzimbric/ps5-linux-image/blob/${GITHUB_SHA}/distros/cachyos1160-k73/README.md), use the recommended bounded Wi-Fi ELF from the [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21), and fully power off instead of using Linux sleep or Rest Mode between attempts.
 
           This build was produced from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). Publishing it for testing proves only that the hosted build and structural checks passed; it is not evidence of a console boot.
 
           ### What's new
 
           - The \`linux-ps5 7.3.0-3\` package uses mainline Linux 7.3 with rmux's published 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`). After it, the build applies the exact \`ps5-btusb-quirks-fix.patch\` asset from [VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), pinned at SHA-256 \`c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8\`. It is rebuilt into this kernel; do not copy a prebuilt \`btusb.ko\` from Bazzite or another image. Bazzite reports successful DualSense pairing on Linux 7.3 and firmware 13.60. That supports the source choice but is not an 11.60 result for this image.
-          - \`ps5fan.service\` requests fixed maximum fan servo pattern \`3\` before the performance policy starts. The tested console's unknown fan revision does not use a working dynamic table, so this remains a conservative bring-up request, not a calibrated curve or proof of physical RPM.
+          - \`ps5fan.service\` leaves the ICC's automatic thermal controller active, sets a 65 C target before the performance policy starts and fails on a readback mismatch. The tested CFI-1115B is recognized as B-Eiger/Denali with Hynix 1x memory. A bounded 20 C diagnostic demand made its fan clearly audible and reduced Tctl from 35.75 C to about 33 C in 28 seconds. Linux still exposes no chassis-fan RPM/tachometer value. Edit \`PS5_FAN_TARGET_C\` in \`/etc/default/ps5-fan\` within 40-80 C and restart the service to change the target; lower values cool more aggressively.
           - \`ps5-performance.service\` now starts by default after the fan request. It verifies amdgpu still has \`dpm=0\`, loads \`ps5_gpufreq\` before \`ps5_cpufreq\`, selects GPU \`simple_ondemand\` and CPU \`schedutil\`, and keeps CPU boost off. Both drivers worked when loaded manually in Run 21, but automatic startup remains experimental until the bounded thermal test passes. To skip it on the next cold boot, create an empty \`/boot/efi/disable-ps5-performance\` file and fully power off. Do not use \`rmmod\` as a rollback because unloading does not restore the clocks.
           - The first session opens the CachyOS Plasma desktop so networking can be configured before Steam needs it. Gaming Mode launches Steam with \`-steamos -gamepadui\`; Steam's own legacy desktop-switch path calls \`steamos-session-select\`, with no custom SteamOSManager service or D-Bus shim. Returning to Gaming Mode stops Plasma's graphical session target before Gamescope starts, and the selector also keeps a \`plasmax11\` escape hatch. The complete Gaming → Desktop → Gaming round trip passed on the local Run 21 console. **Switch to Desktop is not instant:** a clean pass took about 2.4 seconds and an earlier cleanup-heavy transition took about 27 seconds, so wait before clicking again or power-cycling. Linux sleep, suspend, hibernate, hybrid sleep and suspend-then-hibernate are masked; use a full shutdown between Linux boots.
           - The kernel enables amdgpu's VCN video block. The local Run 21 image brought up the display with VCN enabled, but this CI image remains unbooted; see "If there is no picture" below. Its firmware, \`ps5_vcn.bin\` from AMD, is built into the kernel; the licence is in \`/usr/share/licenses/linux-ps5/LICENSE.amdgpu\`.

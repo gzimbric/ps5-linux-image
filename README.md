@@ -67,7 +67,7 @@ Each installation generates its own SSH host keys on first boot. No SSH host pri
 
 - Use Ethernet for the current profile. The PS5's onboard IW620 Wi-Fi modules are deliberately omitted and blacklisted because the successful control package did not contain a working IW620 driver and firmware combination.
 - Run 17 later brought up the onboard Wi-Fi on an installed copy of this image by adding NXP `mlan`/`moal` modules built for this exact kernel and the console's own firmware. The Ubuntu profile was not changed for that test, and images built from it still omit and blacklist the driver. The build, firmware location, and load scripts are in the porting repository's [Wi-Fi guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-wifi.md).
-- `ps5fan.service` automatically requests the Run 16 control's fan servo pattern (`3`) during boot. That request was accepted on the tested console, but fan RPM and cooling performance were not measured; this is not a calibrated fan curve.
+- The Ubuntu profile still uses the earlier servo-pattern `3` helper. Its ICC request was accepted, but it has no RPM readback and must not be described as proven maximum speed. The CachyOS 7.3 next-build source documented below replaces that helper with a read-back-verified autoservo target; the Ubuntu migration still needs its own image test.
 - The boot-report service writes `ps5-boot-report.txt` to the FAT boot partition for systems without UART. That report can contain network addresses, MAC addresses, connection names, and journal identifiers. Review and redact it before posting it publicly.
 
 ### Tested boot envelope
@@ -191,15 +191,35 @@ before posting them because they can contain network details.
 | Wi-Fi | Updated IW620 driver, staged console firmware, stable NetworkManager MAC behavior and Wi-Fi power saving disabled |
 | Bluetooth | The hash-pinned Bazzite Deck v1.0.3 IW620 `btusb` source correction, rebuilt for this kernel, plus the matching BlueZ policy |
 | CPU/GPU clocks | Guarded GPU-then-CPU scaling at startup; GPU `simple_ondemand`, CPU `schedutil`, CPU boost off |
-| Cooling | Fixed maximum fan servo request (`3`) before the performance policy; this is not a calibrated fan curve |
+| Cooling | Legacy servo-pattern `3` request before the performance policy; accepted by ICC, but not proof of maximum speed or RPM |
 | Sessions | Plasma on first boot, Steam with `-steamos -gamepadui`, and working legacy session-selector integration |
 | Sleep | Unsupported Linux sleep, suspend and hibernate targets masked |
 
+#### Image 3 fan hotfix and next-build correction
+
+The published Image 3 hashes below contain the legacy pattern helper. On the
+tested CFI-1115B it left the autoservo target at 86 C, so the helper must not
+be described as forcing maximum RPM. For an immediate, non-persistent Image 3
+hotfix after each boot, set and verify a 65 C target:
+
+```bash
+echo 65 | sudo tee /sys/bus/platform/devices/ps5-fan/target_temp
+cat /sys/bus/platform/devices/ps5-fan/target_temp
+```
+
+The supported public range is 40-80 C; lower values cool more aggressively.
+Current `main` contains the persistent correction for the next image: it
+removes the legacy helper, applies 65 C at boot, checks the controller readback
+and records the target in the boot report. That change is **not** part of the
+published Image 3 archive or hashes.
+
 The local 11.60 follow-up passed Plasma Wi-Fi joining, internal-Bluetooth
 DualSense pairing, and the Gaming Mode → Desktop → Gaming Mode round trip.
-The frequency drivers had already worked when loaded manually. Physical fan
-RPM, a bounded thermal load, video decode, long Bluetooth/Wi-Fi coexistence,
-and a cold boot of the exact hosted image remain open tests. To skip the
+The frequency drivers had already worked when loaded manually. The post-release
+fan hotfix produced an audible ramp and a temperature drop on the local console,
+but RPM is not exposed. A bounded thermal load, video decode, long
+Bluetooth/Wi-Fi coexistence, and a cold boot of the exact hosted image remain
+open tests. To skip the
 experimental startup clock policy, create an empty
 `/boot/efi/disable-ps5-performance` file and fully power off before the next
 boot. Do not unload the frequency modules as a rollback; unloading does not

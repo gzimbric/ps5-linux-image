@@ -7,8 +7,8 @@
 #
 # Columns: status path type mode uid gid size sha256-or-link-target
 # Status: A added, M modified (new values), R removed (old values).
-# The fan helper, the two Wi-Fi modules and the initramfs are built by the
-# same run, so their sizes and hashes are filled in from that build.
+# The two Wi-Fi modules and the initramfs are built by the same run, so their
+# sizes and hashes are filled in from that build.
 A boot/initrd.img-7.3.0 f 0600 0 0 @INITRD_SIZE@ @INITRD_SHA256@
 R boot/initrd.img-7.1.7 f 0600 0 0 54367236 ba6dd1d0e69149e6be60bfd655b4bfc8cac0eee546e1ba478f3bdd1240965a56
 A etc/NetworkManager/conf.d/20-ps5-iw620.conf f 0644 0 0 104 1c521ad4efd0d461fd5c7866a515227cec349a8e041fbe6e5c3ff3e82eb7c5a8
@@ -17,6 +17,7 @@ M etc/bluetooth/main.conf f 0644 0 0 14843 bc576c3c162636ebf787f2125c422d0035222
 A etc/hostname f 0644 0 0 4 e2871a86682961361a3d9c165fc284f2b1a4345940a597c1d3ffb6695c578a24
 M etc/hosts f 0644 0 0 133 1709dde27b0fd66472c71ffb4499307e20bee4f6cea47bc61f7a339b2dc67b5e
 A etc/localtime l 0777 0 0 - /usr/share/zoneinfo/UTC
+A etc/default/ps5-fan f 0644 0 0 153 ed071713ba32afdfb1b8f49975e8ebd0ceaa682f40c7b63807e0f1fd24c6b07c
 A etc/modprobe.d/ps5-amdgpu.conf f 0644 0 0 195 51dbae6f372fa1f5bceee2fd95403042bb6954d29b3f9db2a11c769dd41fc677
 A etc/modprobe.d/ps5-iw620.conf f 0644 0 0 534 60a82f639a3bd1d44e3f9e1405bf8f451039ae04db70df859fad5b6d556b65b1
 A etc/modules-load.d/ps5-ethernet.conf f 0644 0 0 4 2e77b7f98104022b212c2f5739f7cd221037444f417be9423c701f8d6e5b2d01
@@ -36,7 +37,7 @@ A etc/systemd/system/ps5-boot-report.service f 0644 0 0 337 7c74af74b087ce85826a
 A etc/systemd/system/ps5-boot-report.timer f 0644 0 0 171 9074e18c67eaec808a8934417573020249d2c3938b8688fb9ef3b36307c04fec
 A etc/systemd/system/ps5-iw620-firmware.service f 0644 0 0 308 8b17666574ea825f1ec6f9ee90410cd6ad35b5a7501a047e6947c28ccf1332d2
 A etc/systemd/system/ps5-performance.service f 0644 0 0 432 3072a2c92e001427e91cee7e6418d5f86a6713d690c382640bf7dff92520732f
-A etc/systemd/system/ps5fan.service f 0644 0 0 411 6650a001d223ff6e0ddf9f68e51ba9d14e692d2780f75bd57c436d45ad3789a8
+A etc/systemd/system/ps5fan.service f 0644 0 0 471 659eaf4c7190b0c8527abfe83aab4c2cd3d4a6adc239c8fe5084c03aa4189a75
 A etc/systemd/system/sleep.target l 0777 0 0 - /dev/null
 A etc/systemd/system/suspend-then-hibernate.target l 0777 0 0 - /dev/null
 A etc/systemd/system/suspend.target l 0777 0 0 - /dev/null
@@ -59,8 +60,8 @@ A usr/lib/modules/7.3.0/updates/ps5-iw620/moal.ko f 0644 0 0 @MOAL_SIZE@ @MOAL_S
 M usr/bin/steamos-session-select f 0755 0 0 3736 1d099eeacc19bbf575e5a636fc81087a46f72af64390172e437372b493bde1c1
 A usr/local/sbin/ps5-1160-check-boot-files f 0755 0 0 8748 73d5345e710ec61a9340c3490092812563e7ccf2721f3c91c860e3768adb85cf
 A usr/local/sbin/ps5-amdgpu-reprobe f 0755 0 0 797 6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
-A usr/local/sbin/ps5-boot-report f 0755 0 0 13198 300717b9f6d2045fe33f70e20deb8fb4bdbcb5498f9f9a111994ee3395370a70
+A usr/local/sbin/ps5-boot-report f 0755 0 0 13607 193e2fbf272615649a99472f014d33db375d0ca16638d7fbc5cc1bdf12301cdc
 A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2032 b3a4333090cfb09f55bc6a8ad44810b0a66d50f6d369293e7ad4a09231d27bef
+A usr/local/sbin/ps5-fan-target f 0755 0 0 747 3c7d73beb68513f925e884a951d5ddbedc0061e9fa307db6b89208c4c129cc01
 A usr/local/sbin/ps5-performance f 0755 0 0 3182 2bc89fc002e48d173c7693e3e50ee72e57d5de3c220a9dcc69d77d45c760748f
 A usr/local/sbin/ps5-update-boot-files f 0755 0 0 6333 a66af783ddcec491a60bfbb741eff035a1d00e6a0c5992a32ed074a4de0d3535
-A usr/local/sbin/ps5_fan_max f 0755 0 0 @PS5_FAN_MAX_SIZE@ @PS5_FAN_MAX_SHA256@

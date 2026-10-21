@@ -248,6 +248,9 @@ done
 for f in ps5-boot-report ps5-amdgpu-reprobe ps5-1160-check-boot-files ps5-update-boot-files; do
   same "$R/usr/local/sbin/$f" "$PROFILE/files/$f" "/usr/local/sbin/$f"
 done
+same "$R/usr/local/sbin/ps5-fan-target" "$PROFILE/files/ps5-fan-target" \
+  "/usr/local/sbin/ps5-fan-target"
+same "$R/etc/default/ps5-fan" "$PROFILE/files/ps5-fan.conf" "/etc/default/ps5-fan"
 for f in ps5fan ps5-amdgpu-reprobe ps5-performance \
   ps5-iw620-firmware ps5-bt-quiet \
   ps5-boot-report; do
@@ -285,8 +288,15 @@ grep -qF 'next="plasmax11"' "$R/usr/bin/steamos-session-select" ||
   die "the image does not open Plasma on first boot"
 [[ $(stat -c '%a %u %g' -- "$R/home/steam/.config/ps5-next-session") == \
    '644 1000 1000' ]] || die "the first-session token has the wrong mode or owner"
-[[ -x $R/usr/local/sbin/ps5_fan_max && -x $R/usr/local/sbin/grow-rootfs ]] ||
-  die "ps5_fan_max or grow-rootfs is missing"
+[[ -x $R/usr/local/sbin/ps5-fan-target && -x $R/usr/local/sbin/grow-rootfs ]] ||
+  die "ps5-fan-target or grow-rootfs is missing"
+grep -qxF 'PS5_FAN_TARGET_C=65' "$R/etc/default/ps5-fan" ||
+  die "the PS5 fan target is not 65 C"
+grep -qxF 'ExecStart=/usr/local/sbin/ps5-fan-target' \
+  "$R/etc/systemd/system/ps5fan.service" ||
+  die "ps5fan.service does not run ps5-fan-target"
+[[ ! -e $R/usr/local/sbin/ps5_fan_max ]] ||
+  die "the obsolete ps5_fan_max helper is still installed"
 unshare --net chroot "$R" /usr/bin/env -i PATH=/usr/bin LC_ALL=C \
   systemd-analyze verify \
     /etc/systemd/system/ps5fan.service \
