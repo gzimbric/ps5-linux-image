@@ -5,7 +5,8 @@
 # (ps5-linux/ps5-linux-image release built 2026-08-29 from upstream commit
 # 52db0a4), replaces its linux-ps5 7.1.7 kernel with the 7.3.0 package from
 # scripts/build-linux-ps5-k73.sh and scripts/package-linux-ps5-k73.sh, adds
-# the IW620 Wi-Fi modules built for that kernel, applies the
+# the IW620 Wi-Fi modules built for that kernel, enables the in-tree MT7921
+# PCI driver, applies the
 # distros/cachyos1160-k73 profile, builds the initramfs, and writes the new
 # boot files to the FAT partition. Every step is checked, and the build stops
 # at the first mismatch. See distros/cachyos1160-k73/README.md.
@@ -44,9 +45,29 @@ BLUEZ_MAIN_CONF_SHA256=d3762eb24785530885ffa51fffc81b078f5bb362d83cf2462989dbb6b
 BLUEZ_INPUT_CONF_SHA256=d85aa14cab44a058d1ae13a0774961d011da735b49ae4d6546e2cc2e396c6d3d
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-3"
-PACKAGE_FILE=linux-ps5-7.3.0-3-x86_64.pkg.tar.zst
+NEW_PACKAGE="linux-ps5 7.3.0-4"
+PACKAGE_FILE=linux-ps5-7.3.0-4-x86_64.pkg.tar.zst
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
+MT7921E_MODULE=kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko
+MT7921E_ALIASES=(
+  'pci:v000014C3d00007961sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007922sv*sd*bc*sc*i*'
+  'pci:v00000B48d00007922sv*sd*bc*sc*i*'
+  'pci:v000014C3d00000608sv*sd*bc*sc*i*'
+  'pci:v000014C3d00000616sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007920sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007902sv*sd*bc*sc*i*'
+)
+MT7921E_FIRMWARE=(
+  mediatek/WIFI_MT7902_patch_mcu_1_1_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7902_1.bin
+  mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7922_1.bin
+  mediatek/WIFI_MT7961_patch_mcu_1_2_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7961_1.bin
+  mediatek/WIFI_MT7961_patch_mcu_1a_2_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7961_1a.bin
+)
 
 # The FAT partition holds these five files. bzImage and initrd.img come from
 # this build and are checked against the bounded loader; the other three are
@@ -169,6 +190,7 @@ for f in README.md cmdline.txt root-changes.expected config/ps5-amdgpu.conf \
   files/ps5-boot-report files/ps5-boot-report.service \
   files/ps5-boot-report.timer files/ps5_fan_max.c files/ps5fan.service \
   files/ps5-iw620.conf files/ps5-iw620-firmware files/ps5-iw620-firmware.service \
+  files/ps5-mt7921e.conf \
   files/20-ps5-iw620.conf files/ps5-performance files/ps5-performance.service \
   files/ps5-bt-quiet files/ps5-bt-quiet.service \
   files/ps5-1160-check-boot-files files/ps5-update-boot-files \
@@ -445,11 +467,17 @@ echo "ok  /boot/vmlinuz-$KVER is the built bzImage"
 expect_sha "$R/boot/initrd.img-$OLD_KVER" "$ROOT_INITRD_717_SHA256" "/boot/initrd.img-$OLD_KVER"
 rm -- "$R/boot/initrd.img-$OLD_KVER"
 
-log "IW620 Wi-Fi driver"
+log "Wi-Fi drivers"
+# The alternate MediaTek hardware uses Linux 7.3's in-tree mt7921e driver and
+# the firmware already shipped by the CachyOS base image. Its PCI alias is the
+# device gate; the image supplies only the ASPM option and never force-loads it.
+add_file 0644 "$PROFILE/files/ps5-mt7921e.conf" etc/modprobe.d/ps5-mt7921e.conf
+
+# The IW620 path remains separate and exact-ID gated.
 # ps5-iw620.conf keeps udev from loading moal through its PCI alias.
 # ps5-iw620-firmware.service copies this console's firmware from lib/nxp/ on
 # the FAT partition, which only the Wi-Fi loader build writes, and then loads
-# the driver by name. The image ships no Wi-Fi firmware.
+# the driver by name. The image ships no IW620 firmware.
 updates=usr/lib/modules/$KVER/updates
 add_dir "$updates"
 add_dir "$updates/ps5-iw620"
@@ -470,6 +498,47 @@ module_file() { # module
   f=$(in_root modinfo -k "$KVER" -F filename "$1")
   printf '/usr%s\n' "${f#/usr}"
 }
+[[ $(module_file mt7921e) == "/usr/lib/modules/$KVER/$MT7921E_MODULE" ]] ||
+  die "modprobe would not load the in-tree $MT7921E_MODULE"
+mt_vermagic=$(in_root modinfo -k "$KVER" -F vermagic mt7921e)
+[[ $mt_vermagic == "$(in_root modinfo -k "$KVER" -F vermagic cfg80211)" ]] ||
+  die "mt7921e.ko was not built for the packaged kernel"
+[[ $mt_vermagic == "$KVER "* ]] || die "mt7921e vermagic is not for $KVER: $mt_vermagic"
+mt_deps=$(in_root modinfo -k "$KVER" -F depends mt7921e | tr ',' '\n' | sort | tr '\n' ' ')
+[[ $mt_deps == 'mt76 mt76-connac-lib mt7921-common mt792x-lib ' ]] ||
+  die "unexpected mt7921e dependencies: $mt_deps"
+actual=$(in_root modinfo -k "$KVER" -F alias mt7921e | sort)
+expected=$(printf '%s\n' "${MT7921E_ALIASES[@]}" | sort)
+[[ $actual == "$expected" ]] || die "unexpected mt7921e PCI aliases"
+for alias in "${MT7921E_ALIASES[@]}"; do
+  grep -qxF "alias $alias mt7921e" "$R/usr/lib/modules/$KVER/modules.alias" ||
+    die "modules.alias has no mt7921e entry for $alias"
+done
+in_root modinfo -k "$KVER" -F parm mt7921e |
+  grep -qxF 'disable_aspm:disable PCI ASPM support' ||
+  die "mt7921e does not expose the expected disable_aspm parameter"
+actual=$(in_root modinfo -k "$KVER" -F firmware mt7921e | sort)
+expected=$(printf '%s\n' "${MT7921E_FIRMWARE[@]}" | sort)
+[[ $actual == "$expected" ]] || die "unexpected mt7921e firmware declarations"
+for firmware in "${MT7921E_FIRMWARE[@]}"; do
+  [[ -f $R/usr/lib/firmware/$firmware || -f $R/usr/lib/firmware/$firmware.zst ]] ||
+    die "mt7921e firmware is missing: /usr/lib/firmware/${firmware}[.zst]"
+done
+cmp -- "$R/etc/modprobe.d/ps5-mt7921e.conf" "$PROFILE/files/ps5-mt7921e.conf" ||
+  die "/etc/modprobe.d/ps5-mt7921e.conf differs from the profile"
+[[ $(stat -c '%a %u %g' -- "$R/etc/modprobe.d/ps5-mt7921e.conf") == '644 0 0' ]] ||
+  die "/etc/modprobe.d/ps5-mt7921e.conf has the wrong mode or owner"
+[[ $(cat "$R/etc/modprobe.d/ps5-mt7921e.conf") == 'options mt7921e disable_aspm=1' ]] ||
+  die "/etc/modprobe.d/ps5-mt7921e.conf has unexpected content"
+mt_blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+mt7921e([[:space:]]|$)' \
+  "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d" || true)
+[[ -z $mt_blocks ]] || die "mt7921e is blocked: $mt_blocks"
+mt_loads=$(grep -Rslw -- mt7921e "$R/etc/modules-load.d" "$R/usr/lib/modules-load.d" \
+  2>/dev/null || true)
+[[ -z $mt_loads ]] || die "mt7921e is force-loaded by: ${mt_loads//$'\n'/ }"
+mt_services=$(grep -Rslw -- mt7921e "$R/etc/systemd/system" "$R/usr/lib/systemd/system" \
+  2>/dev/null || true)
+[[ -z $mt_services ]] || die "mt7921e is referenced by a systemd unit: ${mt_services//$'\n'/ }"
 for module in mlan moal; do
   [[ $(module_file "$module") == "/$updates/ps5-iw620/$module.ko" ]] ||
     die "modprobe would not load /$updates/ps5-iw620/$module.ko"
@@ -479,6 +548,10 @@ for module in mlan moal; do
 done
 grep -qxF "alias $IW620_ALIAS moal" "$R/usr/lib/modules/$KVER/modules.alias" ||
   die "modules.alias has no IW620 entry"
+if ! grep -qF '= 0x1b4b ] || continue' "$R/usr/local/sbin/ps5-iw620-firmware" ||
+   ! grep -qF '= 0x2b56 ] || continue' "$R/usr/local/sbin/ps5-iw620-firmware"; then
+  die "ps5-iw620-firmware is not gated to PCI 1b4b:2b56"
+fi
 # Only the alias load of moal is blocked, and only by ps5-iw620.conf.
 blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(moal|mlan)([[:space:]]|$)' \
   "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d" || true)
@@ -488,7 +561,8 @@ blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(moal|mlan)([[:s
 pullins=$(find "$R/etc/systemd/system" "$R/usr/lib/systemd/system" \
   -name 'ps5-stage-firmware*' -print)
 [[ -z $pullins ]] || die "ps5-stage-firmware is still installed: $pullins"
-echo "ok  mlan.ko and moal.ko in /$updates/ps5-iw620, loaded by ps5-iw620-firmware, not by udev"
+echo "ok  mt7921e in-tree with firmware and disable_aspm, selected only by its PCI aliases"
+echo "ok  mlan.ko and moal.ko in /$updates/ps5-iw620, exact-ID gated and loaded by ps5-iw620-firmware, not by udev"
 
 log "Bluetooth helper"
 # ps5-bt-quiet came with the 7.1.7 package and is enabled in the base image.
@@ -681,8 +755,8 @@ altered=$(sed -nE 's#^(warning|error): linux-ps5: /([^ ]+) .*#\2#p' <<<"$qkk" | 
 unexpected=$(grep -vE "^usr/lib/modules/$KVER/modules\.[a-z.]+$" <<<"$altered" || true)
 [[ -z $unexpected ]] || die "linux-ps5 files changed after installation: ${unexpected//$'\n'/ }"
 echo "ok  pacman -Qkk linux-ps5: $(grep -c . <<<"$altered" || true) module index files rewritten by depmod"
-package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-3/files" > "$work/package-new.paths"
-echo "linux-ps5 7.3.0-3 owns $(wc -l < "$work/package-new.paths") paths"
+package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-4/files" > "$work/package-new.paths"
+echo "linux-ps5 7.3.0-4 owns $(wc -l < "$work/package-new.paths") paths"
 
 expect_sha "$R/etc/mkinitcpio.conf" "$MKINITCPIO_CONF_SHA256" "/etc/mkinitcpio.conf (unchanged)"
 umount_all
@@ -722,9 +796,13 @@ authkeys=$(find "$M" -xdev \( -name authorized_keys -o -name authorized_keys2 \)
 [[ -z $authkeys ]] || die "authorized_keys in the image: $authkeys"
 firmware=$(find "$M" -xdev -name 'pcieuartiw620*' -print)
 [[ -z $firmware ]] || die "IW620 firmware in the image: $firmware"
+for firmware in "${MT7921E_FIRMWARE[@]}"; do
+  [[ -f $M/usr/lib/firmware/$firmware || -f $M/usr/lib/firmware/$firmware.zst ]] ||
+    die "mt7921e firmware is missing after the image build: /usr/lib/firmware/${firmware}[.zst]"
+done
 [[ -f $M/etc/ps5-first-boot-done ]] || die "first-boot marker missing"
 [[ $(cat "$M/etc/hostname") == ps5 ]] || die "hostname is not ps5"
-echo "ok  no SSH host keys, no authorized_keys, no IW620 firmware, hostname ps5, first-boot marker present"
+echo "ok  no SSH host keys, no authorized_keys, no IW620 firmware, MediaTek firmware present, hostname ps5, first-boot marker present"
 root_manifest "$M" "$work/root-after.tsv"
 umount_all
 

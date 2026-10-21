@@ -105,7 +105,7 @@ scrub() {
             printf '%s missing\n' "$firmware"
         fi
     done
-    for module in cfg80211 mlan moal; do
+    for module in cfg80211 mt76 mt76_connac_lib mt792x_lib mt7921_common mt7921e mlan moal; do
         if [ -d "/sys/module/$module" ]; then
             printf 'module %s loaded\n' "$module"
         else
@@ -113,27 +113,36 @@ scrub() {
         fi
     done
     printf 'modinfo -n moal: '; modinfo -n moal 2>&1 || true
+    printf 'modinfo -n mt7921e: '; modinfo -n mt7921e 2>&1 || true
+    printf 'mt7921e disable_aspm='; \
+        cat /sys/module/mt7921e/parameters/disable_aspm 2>/dev/null || echo not-loaded
     printf 'tainted='; cat /proc/sys/kernel/tainted 2>&1 || true
     for dev in /sys/bus/pci/devices/*; do
-        [ "$(cat "$dev/vendor" 2>/dev/null)" = 0x1b4b ] || continue
-        [ "$(cat "$dev/device" 2>/dev/null)" = 0x2b56 ] || continue
+        vendor=$(cat "$dev/vendor" 2>/dev/null || true)
+        device=$(cat "$dev/device" 2>/dev/null || true)
+        case "$vendor:$device" in
+            0x1b4b:0x2b56|0x14c3:0x7961) ;;
+            *) continue ;;
+        esac
         driver=none
         [ ! -e "$dev/driver" ] || driver=$(basename "$(readlink "$dev/driver")")
         net=
         for iface in "$dev"/net/*; do
             [ ! -e "$iface" ] || net="$net ${iface##*/}"
         done
-        printf '%s driver=%s net=%s\n' "${dev##*/}" "$driver" "${net# }"
+        printf '%s pci=%s:%s driver=%s net=%s\n' "${dev##*/}" \
+            "${vendor#0x}" "${device#0x}" "$driver" "${net# }"
     done
     # Count only; network names stay out of the report. --rescan no uses the
     # last scan instead of waiting for a new one.
     printf 'wifi networks in scan: '
     timeout 5 nmcli --terse --fields SSID device wifi list --rescan no 2>/dev/null | wc -l
-    dmesg --color=never 2>&1 | grep -E 'wlan:|WLAN|PCIEIW620|FW download|Request firmware|request_firmware' \
+    dmesg --color=never 2>&1 | grep -E 'wlan:|WLAN|PCIEIW620|mt7921|mt76|FW download|Request firmware|request_firmware' \
         | tail -n 40 || true
 
     echo
     echo "[bluetooth]"
+    lsusb 2>&1 || true
     lsusb -d 1286:2059 2>&1 || true
     lsusb -t 2>&1 || true
     btusb=$(modinfo -n btusb 2>/dev/null || true)

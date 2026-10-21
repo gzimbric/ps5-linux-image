@@ -4,8 +4,8 @@
 # Run after scripts/build-cachyos1160-k73-image.sh, and again after anything
 # that rewrites the image (CI zeroes the free blocks of the root filesystem
 # first). It checks what has to be true on the console: the FAT boot files
-# and the bounded loader's limits, the kernel and its modules, the Wi-Fi
-# driver and the absence of its firmware, the guarded frequency-driver
+# and the bounded loader's limits, the kernel and its modules, both Wi-Fi
+# paths, MediaTek firmware and the absence of IW620 firmware, the guarded frequency-driver
 # startup, the enabled services, the kernel hold and
 # the boot-file hook, and the account and SSH hygiene.
 #
@@ -18,11 +18,31 @@ shopt -s inherit_errexit
 export LC_ALL=C
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-3"
+NEW_PACKAGE="linux-ps5 7.3.0-4"
 IMAGE_SIZE=12582912000
 P1_START=1024000 P1_SECTORS=23549952
 P2_START=2048 P2_SECTORS=1021952
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
+MT7921E_MODULE=kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko
+MT7921E_ALIASES=(
+  'pci:v000014C3d00007961sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007922sv*sd*bc*sc*i*'
+  'pci:v00000B48d00007922sv*sd*bc*sc*i*'
+  'pci:v000014C3d00000608sv*sd*bc*sc*i*'
+  'pci:v000014C3d00000616sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007920sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007902sv*sd*bc*sc*i*'
+)
+MT7921E_FIRMWARE=(
+  mediatek/WIFI_MT7902_patch_mcu_1_1_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7902_1.bin
+  mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7922_1.bin
+  mediatek/WIFI_MT7961_patch_mcu_1_2_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7961_1.bin
+  mediatek/WIFI_MT7961_patch_mcu_1a_2_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7961_1a.bin
+)
 
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PROFILE=$REPO/distros/cachyos1160-k73
@@ -94,6 +114,10 @@ R=$tmp/root B=$tmp/boot
 mkdir -p "$R" "$B"
 mount -t ext4 -o ro,noload "$root_dev" "$R"; MOUNTS+=("$R")
 mount -t vfat -o ro "$boot_dev" "$B"; MOUNTS+=("$B")
+in_root() {
+  unshare --net chroot "$R" /usr/bin/env -i \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/bin HOME=/root LC_ALL=C "$@"
+}
 
 # -------------------------------------------------------------- boot files
 
@@ -121,8 +145,8 @@ ok "bzImage: $version"
 # ------------------------------------------------------------------ kernel
 
 db=$(cd -- "$R/var/lib/pacman/local" && find . -mindepth 1 -maxdepth 1 -name 'linux-ps5-*' -printf '%P\n')
-[[ $db == linux-ps5-7.3.0-3 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
-[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-3 ]] ||
+[[ $db == linux-ps5-7.3.0-4 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
+[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-4 ]] ||
   die "pacman database does not say $NEW_PACKAGE"
 modules=$(cd -- "$R/usr/lib/modules" && find . -mindepth 1 -maxdepth 1 -printf '%P\n')
 [[ $modules == "$KVER" ]] || die "kernel module trees: ${modules//$'\n'/ }"
@@ -133,6 +157,57 @@ ok "$NEW_PACKAGE installed, only /usr/lib/modules/$KVER, VCN licence present"
 # ------------------------------------------------------------------- Wi-Fi
 
 m=$R/usr/lib/modules/$KVER
+mt7921e=$m/$MT7921E_MODULE
+[[ -f $mt7921e ]] || die "$MT7921E_MODULE is not installed"
+grep -q "^$MT7921E_MODULE:" "$m/modules.dep" || die "mt7921e.ko is not in modules.dep"
+if [[ -f $kernel_dir/staging/lib/modules/$KVER/$MT7921E_MODULE ]]; then
+  same "$mt7921e" "$kernel_dir/staging/lib/modules/$KVER/$MT7921E_MODULE" \
+    "mt7921e.ko = the built module"
+fi
+mt_filename=$(in_root modinfo -k "$KVER" -F filename mt7921e)
+mt_filename=/usr${mt_filename#/usr}
+[[ $mt_filename == "/usr/lib/modules/$KVER/$MT7921E_MODULE" ]] ||
+  die "modprobe resolves mt7921e to $mt_filename"
+mt_vermagic=$(in_root modinfo -k "$KVER" -F vermagic mt7921e)
+[[ $mt_vermagic == "$(in_root modinfo -k "$KVER" -F vermagic cfg80211)" ]] ||
+  die "mt7921e vermagic does not match cfg80211"
+[[ $mt_vermagic == "$KVER "* ]] || die "mt7921e vermagic is not for $KVER: $mt_vermagic"
+mt_deps=$(in_root modinfo -k "$KVER" -F depends mt7921e | tr ',' '\n' | sort | tr '\n' ' ')
+[[ $mt_deps == 'mt76 mt76-connac-lib mt7921-common mt792x-lib ' ]] ||
+  die "unexpected mt7921e dependencies: $mt_deps"
+actual=$(in_root modinfo -k "$KVER" -F alias mt7921e | sort)
+expected=$(printf '%s\n' "${MT7921E_ALIASES[@]}" | sort)
+[[ $actual == "$expected" ]] || die "unexpected mt7921e PCI aliases"
+for alias in "${MT7921E_ALIASES[@]}"; do
+  grep -qxF "alias $alias mt7921e" "$m/modules.alias" ||
+    die "modules.alias has no mt7921e entry for $alias"
+done
+in_root modinfo -k "$KVER" -F parm mt7921e |
+  grep -qxF 'disable_aspm:disable PCI ASPM support' ||
+  die "mt7921e does not expose the expected disable_aspm parameter"
+actual=$(in_root modinfo -k "$KVER" -F firmware mt7921e | sort)
+expected=$(printf '%s\n' "${MT7921E_FIRMWARE[@]}" | sort)
+[[ $actual == "$expected" ]] || die "unexpected mt7921e firmware declarations"
+for firmware in "${MT7921E_FIRMWARE[@]}"; do
+  [[ -f $R/usr/lib/firmware/$firmware || -f $R/usr/lib/firmware/$firmware.zst ]] ||
+    die "mt7921e firmware is missing: /usr/lib/firmware/${firmware}[.zst]"
+done
+same "$R/etc/modprobe.d/ps5-mt7921e.conf" "$PROFILE/files/ps5-mt7921e.conf" \
+  "/etc/modprobe.d/ps5-mt7921e.conf"
+[[ $(stat -c '%a %u %g' -- "$R/etc/modprobe.d/ps5-mt7921e.conf") == '644 0 0' ]] ||
+  die "/etc/modprobe.d/ps5-mt7921e.conf has the wrong mode or owner"
+[[ $(cat "$R/etc/modprobe.d/ps5-mt7921e.conf") == 'options mt7921e disable_aspm=1' ]] ||
+  die "/etc/modprobe.d/ps5-mt7921e.conf has unexpected content"
+mt_blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+mt7921e([[:space:]]|$)' \
+  "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d" || true)
+[[ -z $mt_blocks ]] || die "mt7921e is blocked: $mt_blocks"
+mt_loads=$(grep -Rslw -- mt7921e "$R/etc/modules-load.d" "$R/usr/lib/modules-load.d" \
+  2>/dev/null || true)
+[[ -z $mt_loads ]] || die "mt7921e is force-loaded by: ${mt_loads//$'\n'/ }"
+mt_services=$(grep -Rslw -- mt7921e "$R/etc/systemd/system" "$R/usr/lib/systemd/system" \
+  2>/dev/null || true)
+[[ -z $mt_services ]] || die "mt7921e is referenced by a systemd unit: ${mt_services//$'\n'/ }"
+
 for module in mlan moal; do
   f=$m/updates/ps5-iw620/$module.ko
   [[ -f $f ]] || die "$module.ko is not in updates/ps5-iw620"
@@ -142,6 +217,10 @@ for module in mlan moal; do
   grep -q "^updates/ps5-iw620/$module.ko:" "$m/modules.dep" || die "$module.ko is not in modules.dep"
 done
 grep -qxF "alias $IW620_ALIAS moal" "$m/modules.alias" || die "modules.alias has no IW620 entry"
+if ! grep -qF '= 0x1b4b ] || continue' "$R/usr/local/sbin/ps5-iw620-firmware" ||
+   ! grep -qF '= 0x2b56 ] || continue' "$R/usr/local/sbin/ps5-iw620-firmware"; then
+  die "ps5-iw620-firmware is not gated to PCI 1b4b:2b56"
+fi
 same "$R/etc/modprobe.d/ps5-iw620.conf" "$PROFILE/files/ps5-iw620.conf" "/etc/modprobe.d/ps5-iw620.conf"
 same "$R/etc/NetworkManager/conf.d/20-ps5-iw620.conf" \
   "$PROFILE/files/20-ps5-iw620.conf" "/etc/NetworkManager/conf.d/20-ps5-iw620.conf"
@@ -159,7 +238,8 @@ for setting in \
   grep -qx "$setting" "$R/etc/NetworkManager/conf.d/20-ps5-iw620.conf" ||
     die "NetworkManager IW620 setting is missing: $setting"
 done
-ok "IW620 driver installed, udev alias load blocked, no firmware, stable MAC and power settings applied"
+ok "MT7921E in-tree with firmware and disable_aspm, selected only by its PCI aliases"
+ok "IW620 driver installed, exact-ID gated, udev alias load blocked, no IW620 firmware, stable MAC and power settings applied"
 
 # --------------------------------------------------------------- Bluetooth
 
@@ -220,10 +300,10 @@ for name in ce me mec mec2 pfp rlc sdma sdma1; do
     die "the initramfs has no cyan_skillfish2_$name.bin"
 done
 grep -qx etc/modprobe.d/ps5-amdgpu.conf <<<"$contents" || die "the initramfs has no ps5-amdgpu.conf"
-if grep -E '(^|/)((mlan|moal|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' <<<"$contents"; then
+if grep -E '(^|/)((mlan|moal|mt7921e|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' <<<"$contents"; then
   die "the initramfs has the Wi-Fi driver, its firmware or a frequency driver"
 fi
-ok "initramfs: amdgpu for $KVER, 8 GPU firmware files, ps5-amdgpu.conf, no Wi-Fi driver or frequency drivers"
+ok "initramfs: amdgpu for $KVER, 8 GPU firmware files, ps5-amdgpu.conf, no Wi-Fi drivers or frequency drivers"
 
 # ---------------------------------------------------------------- services
 

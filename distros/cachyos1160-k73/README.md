@@ -31,6 +31,23 @@ The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
 (sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
 
+## MediaTek candidate branch
+
+This branch is not the published Image 3 source. It packages the kernel as
+`linux-ps5 7.3.0-4` and adds Linux 7.3's in-tree `mt7921e` driver for the
+alternate MediaTek PCI Wi-Fi device (`14c3:7961`). The PCI modalias selects
+the driver only on matching hardware; it is not force-loaded and does not
+change the exact-ID-gated IW620 path. The image supplies
+`options mt7921e disable_aspm=1`, matching the runtime option used by
+[j4lenj's Linux 7.1.7 reference](https://github.com/j4lenj/ps5-mt7921-wifi),
+and verifies the eight firmware files already provided by CachyOS.
+
+For a MediaTek test, use the bounded non-Wi-Fi loader ELF because no IW620
+firmware dump is needed. This candidate makes no claim about MediaTek
+Bluetooth. Its exact CI image must remain a draft until the build checks pass,
+and must remain labeled unbooted until a tester records its raw-image identity
+and boots it on matching hardware.
+
 ## Current Image 3 prerelease
 
 | Item | Value |
@@ -305,9 +322,9 @@ with a fixed build user, host and timestamp. The kernel step
   applies the patch to v7.3, then checks and applies the local
   [`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch)
   (`c01bdcc…`);
-- sets `X86_PS5_CPUFREQ=m` and `PS5_GPUFREQ=m` (the published config has them
-  built in) and runs `make olddefconfig`. Every other difference from the
-  published config is a toolchain line; the build log shows the diff;
+- sets `X86_PS5_CPUFREQ=m`, `PS5_GPUFREQ=m`, and `MT7921E=m` (the published
+  config does not build all three as modules) and runs `make olddefconfig`.
+  The build log shows the complete config diff;
 - builds `bzImage` and the modules, checks that `ps5_vcn.bin` is built into
   the kernel, and checks `bzImage` against the bounded loader;
 - records the `bzImage` size and SHA-256 in `kernel/kernel-build-info.txt`.
@@ -330,7 +347,7 @@ modpost warning, and checks `.return_sites`, the vermagic and the IW620 PCI
 alias. Passing those gates does not replace an exact-image hardware test.
 
 [`scripts/package-linux-ps5-k73.sh`](../../scripts/package-linux-ps5-k73.sh)
-packages the kernel as `linux-ps5 7.3.0-3` for pacman, laid out like the
+packages the kernel as `linux-ps5 7.3.0-4` for pacman, laid out like the
 upstream package (kernel, modules, build headers, UAPI headers) plus AMD's
 licence for `ps5_vcn.bin` in `/usr/share/licenses/linux-ps5`. Its install
 script does nothing to `/boot/efi`; the pacman hook below does that.
@@ -341,7 +358,7 @@ script does nothing to `/boot/efi`; the pacman hook below does that.
 checks the base download, its partition table and both partition hashes,
 then in a chroot without network:
 
-1. replaces `linux-ps5 7.1.7-1` with `7.3.0-3` (`pacman -U`, install script
+1. replaces `linux-ps5 7.1.7-1` with `7.3.0-4` (`pacman -U`, install script
    skipped) and removes the old `/boot/initrd.img-7.1.7`;
 2. installs `mlan.ko` and `moal.ko` in `/usr/lib/modules/7.3.0/updates/ps5-iw620`
    and runs `depmod`;
@@ -363,7 +380,7 @@ The build stops unless:
   [`root-changes.expected`](root-changes.expected) exactly;
 - the initramfs holds `amdgpu.ko` for 7.3.0, the eight Cyan Skillfish 2
   firmware files and `ps5-amdgpu.conf`, and none of `mlan`, `moal`,
-  `ps5-cpufreq`, `ps5-gpufreq` or IW620 firmware;
+  `mt7921e`, `ps5-cpufreq`, `ps5-gpufreq` or IW620 firmware;
 - the FAT partition holds exactly `bzImage`, `initrd.img`, `cmdline.txt`,
   `vram.txt` and `kexec.sh`, and they pass the bounded loader check;
 - there are no SSH host keys, no `authorized_keys` and no IW620 firmware
@@ -419,11 +436,14 @@ when it exits.
 
 What is different:
 
-- **Kernel.** `linux-ps5 7.3.0-3` replaces 7.1.7. The 7.1.7 package also
+- **Kernel.** `linux-ps5 7.3.0-4` replaces 7.1.7. The 7.1.7 package also
   carried a modules-load entry and options for its own Wi-Fi build, the
   `ps5-stage-firmware` helper and `ps5-bt-quiet`; they go with it. The
   profile puts `ps5-bt-quiet` and its unit back unchanged, enabled as before.
-- **Wi-Fi.** `mlan.ko` and `moal.ko` in `updates/ps5-iw620`, and the module
+- **Wi-Fi.** Matching MediaTek hardware uses the in-tree `mt7921e` module,
+  the firmware already packaged by CachyOS, and `disable_aspm=1`. It is loaded
+  only by its PCI modalias. IW620 hardware uses `mlan.ko` and `moal.ko` in
+  `updates/ps5-iw620`, and the module
   options already used with the 7.1.7 Ubuntu Wi-Fi build in
   `/etc/modprobe.d/ps5-iw620.conf`. That file also has `blacklist moal`, so
   udev does not load `moal` through its PCI alias: it would do that before

@@ -17,7 +17,7 @@ umask 022
 
 KVER=7.3.0
 PKGNAME=linux-ps5
-PKGVER=${KVER}-3
+PKGVER=${KVER}-4
 # Commit time of the pinned patch set (36f173f).
 SOURCE_DATE_EPOCH=1792339253
 
@@ -118,12 +118,13 @@ listing=$(bsdtar -tf "$pkg")
 for f in .PKGINFO .INSTALL .MTREE "boot/vmlinuz-$KVER" \
   "usr/lib/modules/$KVER/kernel/drivers/cpufreq/ps5-cpufreq.ko" \
   "usr/lib/modules/$KVER/kernel/drivers/devfreq/ps5-gpufreq.ko" \
+  "usr/lib/modules/$KVER/kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko" \
   "usr/lib/modules/$KVER/build/Makefile" \
   "usr/share/licenses/$PKGNAME/LICENSE.amdgpu"; do
   grep -qxF -- "$f" <<<"$listing" || die "$f is missing from the package"
 done
 if grep -E '(^|/)(mlan|moal)\.ko|pcieuartiw620|^etc/' <<<"$listing"; then
-  die "the package has Wi-Fi or /etc files; the image installs those"
+  die "the package has IW620 files or /etc files; the image installs those"
 fi
 cmp -s <(bsdtar -xOf "$pkg" "boot/vmlinuz-$KVER") "$staging/boot/bzImage" ||
   die "boot/vmlinuz-$KVER in the package is not the built bzImage"

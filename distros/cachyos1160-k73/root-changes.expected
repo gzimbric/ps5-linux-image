@@ -1,7 +1,7 @@
 # Every root filesystem (p1) change scripts/build-cachyos1160-k73-image.sh is
 # allowed to make to the official ps5-cachyos image, apart from the kernel
 # package swap. The build compares full before/after file manifests of the
-# root partition. Paths owned by linux-ps5 7.1.7-1 or 7.3.0-3 are the kernel
+# root partition. Paths owned by linux-ps5 7.1.7-1 or 7.3.0-4 are the kernel
 # swap, which pacman checks; every other difference must match this list
 # exactly.
 #
@@ -19,6 +19,7 @@ M etc/hosts f 0644 0 0 133 1709dde27b0fd66472c71ffb4499307e20bee4f6cea47bc61f7a3
 A etc/localtime l 0777 0 0 - /usr/share/zoneinfo/UTC
 A etc/modprobe.d/ps5-amdgpu.conf f 0644 0 0 195 51dbae6f372fa1f5bceee2fd95403042bb6954d29b3f9db2a11c769dd41fc677
 A etc/modprobe.d/ps5-iw620.conf f 0644 0 0 534 60a82f639a3bd1d44e3f9e1405bf8f451039ae04db70df859fad5b6d556b65b1
+A etc/modprobe.d/ps5-mt7921e.conf f 0644 0 0 31 7e42041ef94784dd91823f5f4f0675583863c92735327b61c87af4fe0d478a14
 A etc/modules-load.d/ps5-ethernet.conf f 0644 0 0 4 2e77b7f98104022b212c2f5739f7cd221037444f417be9423c701f8d6e5b2d01
 M etc/pacman.conf f 0644 0 0 3019 9aa21b480b54adea829ee5b69f63ad421807a9d313fa0a52b23ad6135637c139
 A etc/pacman.d/hooks d 0755 0 0 - -
@@ -59,8 +60,8 @@ A usr/lib/modules/7.3.0/updates/ps5-iw620/moal.ko f 0644 0 0 @MOAL_SIZE@ @MOAL_S
 M usr/bin/steamos-session-select f 0755 0 0 3736 1d099eeacc19bbf575e5a636fc81087a46f72af64390172e437372b493bde1c1
 A usr/local/sbin/ps5-1160-check-boot-files f 0755 0 0 8748 73d5345e710ec61a9340c3490092812563e7ccf2721f3c91c860e3768adb85cf
 A usr/local/sbin/ps5-amdgpu-reprobe f 0755 0 0 797 6a2d4657f2d845a01644e6b4e5f088cec052310dfcfe7d9bec06fce3f40edaca
-A usr/local/sbin/ps5-boot-report f 0755 0 0 13198 300717b9f6d2045fe33f70e20deb8fb4bdbcb5498f9f9a111994ee3395370a70
-A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2032 b3a4333090cfb09f55bc6a8ad44810b0a66d50f6d369293e7ad4a09231d27bef
+A usr/local/sbin/ps5-boot-report f 0755 0 0 13627 9285d4c612fae2446b1b69db5e6ab67923d60cb5aa8aadf09310b3a024919d94
+A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2038 7b6098c5de8b58755f14e6b60264fdc8fe239e7c5ca8a337022bdb65caf012e4
 A usr/local/sbin/ps5-performance f 0755 0 0 3182 2bc89fc002e48d173c7693e3e50ee72e57d5de3c220a9dcc69d77d45c760748f
-A usr/local/sbin/ps5-update-boot-files f 0755 0 0 6333 a66af783ddcec491a60bfbb741eff035a1d00e6a0c5992a32ed074a4de0d3535
+A usr/local/sbin/ps5-update-boot-files f 0755 0 0 6341 93b96ca6e5745c98ddae53b733db8f30174eaeb67a7883dfc1fede5d5db7cc41
 A usr/local/sbin/ps5_fan_max f 0755 0 0 @PS5_FAN_MAX_SIZE@ @PS5_FAN_MAX_SHA256@

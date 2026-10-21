@@ -5,8 +5,8 @@ run-name: CachyOS 7.3 11.60 image (${{ github.ref_name }})
 # GitHub-hosted x86_64 runners, in two jobs:
 #
 #   kernel  Linux v7.3 with rmux's 7.3 port of the PS5 patches
-#           (rmuxnet/ps5-linux-patches-1, pinned), the IW620 Wi-Fi modules for
-#           that kernel, and the linux-ps5 pacman package.
+#           (rmuxnet/ps5-linux-patches-1, pinned), in-tree MT7921 PCI support,
+#           the IW620 Wi-Fi modules for that kernel, and the linux-ps5 package.
 #   image   The official ps5-cachyos image with that kernel and the
 #           distros/cachyos1160-k73 profile, checked again read-only after the
 #           free blocks are zeroed, compressed to one .img.xz and attached to
@@ -65,7 +65,7 @@ defaults:
 
 env:
   KERNEL_DIR: linux-bin/cachyos1160-k73
-  PACKAGE: linux-ps5-7.3.0-3-x86_64.pkg.tar.zst
+  PACKAGE: linux-ps5-7.3.0-4-x86_64.pkg.tar.zst
 
 jobs:
   kernel:
@@ -509,18 +509,19 @@ jobs:
           cd "$DIST"
 
           cat > release-notes.md <<EOF
-          **Public Image 3 tester prerelease for retail PS5 firmware 11.60 only. This exact CI-built image has not been booted on hardware.** A local prerelease image from this profile booted in Run 21, but it was not this artifact. Follow the [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md), use the recommended bounded Wi-Fi ELF from the [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21), and fully power off instead of using Linux sleep or Rest Mode between attempts.
+          **MediaTek MT7921 test candidate for retail PS5 firmware 11.60 only. This exact CI-built image and its MediaTek path have not been booted on hardware.** It retains the Image 3 fixes that passed on the local IW620 console, but those results do not transfer to this artifact or to MediaTek hardware. Follow the [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md) for the common boot and safety steps and use the [matching bounded loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21): the bounded non-Wi-Fi ELF for MediaTek hardware, or the bounded Wi-Fi ELF for IW620 hardware. Fully power off instead of using Linux sleep or Rest Mode between attempts.
 
           This build was produced from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). Publishing it for testing proves only that the hosted build and structural checks passed; it is not evidence of a console boot.
 
-          ### What's new
+          ### What's in this candidate
 
-          - The \`linux-ps5 7.3.0-3\` package uses mainline Linux 7.3 with rmux's published 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`). After it, the build applies the exact \`ps5-btusb-quirks-fix.patch\` asset from [VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), pinned at SHA-256 \`c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8\`. It is rebuilt into this kernel; do not copy a prebuilt \`btusb.ko\` from Bazzite or another image. Bazzite reports successful DualSense pairing on Linux 7.3 and firmware 13.60. That supports the source choice but is not an 11.60 result for this image.
+          - The \`linux-ps5 7.3.0-4\` package uses mainline Linux 7.3 with rmux's published 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`). After it, the build applies the exact \`ps5-btusb-quirks-fix.patch\` asset from [VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), pinned at SHA-256 \`c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8\`. It is rebuilt into this kernel; do not copy a prebuilt \`btusb.ko\` from Bazzite or another image. Bazzite reports successful DualSense pairing on Linux 7.3 and firmware 13.60. That supports the source choice but is not an 11.60 result for this image.
           - \`ps5fan.service\` requests fixed maximum fan servo pattern \`3\` before the performance policy starts. The tested console's unknown fan revision does not use a working dynamic table, so this remains a conservative bring-up request, not a calibrated curve or proof of physical RPM.
           - \`ps5-performance.service\` now starts by default after the fan request. It verifies amdgpu still has \`dpm=0\`, loads \`ps5_gpufreq\` before \`ps5_cpufreq\`, selects GPU \`simple_ondemand\` and CPU \`schedutil\`, and keeps CPU boost off. Both drivers worked when loaded manually in Run 21, but automatic startup remains experimental until the bounded thermal test passes. To skip it on the next cold boot, create an empty \`/boot/efi/disable-ps5-performance\` file and fully power off. Do not use \`rmmod\` as a rollback because unloading does not restore the clocks.
           - The first session opens the CachyOS Plasma desktop so networking can be configured before Steam needs it. Gaming Mode launches Steam with \`-steamos -gamepadui\`; Steam's own legacy desktop-switch path calls \`steamos-session-select\`, with no custom SteamOSManager service or D-Bus shim. Returning to Gaming Mode stops Plasma's graphical session target before Gamescope starts, and the selector also keeps a \`plasmax11\` escape hatch. The complete Gaming → Desktop → Gaming round trip passed on the local Run 21 console. **Switch to Desktop is not instant:** a clean pass took about 2.4 seconds and an earlier cleanup-heavy transition took about 27 seconds, so wait before clicking again or power-cycling. Linux sleep, suspend, hibernate, hybrid sleep and suspend-then-hibernate are masked; use a full shutdown between Linux boots.
           - The kernel enables amdgpu's VCN video block. The local Run 21 image brought up the display with VCN enabled, but this CI image remains unbooted; see "If there is no picture" below. Its firmware, \`ps5_vcn.bin\` from AMD, is built into the kernel; the licence is in \`/usr/share/licenses/linux-ps5/LICENSE.amdgpu\`.
-          - The onboard IW620 Wi-Fi driver is updated to \`ps5-linux/ps5-linux-mwifiex\` commit \`4bce848\`, including its HE and transmit-path fixes, with the Linux 7.3 compatibility follow-up. NetworkManager disables scan-time MAC randomization and Wi-Fi power saving and keeps the adapter's permanent MAC; Wi-Fi through the Plasma interface passed on the local Run 21 console. The image still contains no Wi-Fi firmware: the bounded Wi-Fi loader writes this console's own firmware to \`lib/nxp/\` on the boot partition, and the boot service copies it before loading the driver. Never upload or redistribute \`lib/nxp/pcieuartiw620_combo_v1.bin\` or \`/lib/firmware/nxp/pcieuartiw620_combo_v1.bin\`.
+          - The onboard IW620 Wi-Fi driver is updated to \`ps5-linux/ps5-linux-mwifiex\` commit \`4bce848\`, including its HE and transmit-path fixes, with the Linux 7.3 compatibility follow-up. NetworkManager disables scan-time MAC randomization and Wi-Fi power saving and keeps the adapter's permanent MAC; Wi-Fi through the Plasma interface passed on the local Run 21 console. The image still contains no IW620 firmware: the bounded Wi-Fi loader writes this console's own firmware to \`lib/nxp/\` on the boot partition, and the boot service copies it before loading the driver. Never upload or redistribute \`lib/nxp/pcieuartiw620_combo_v1.bin\` or \`/lib/firmware/nxp/pcieuartiw620_combo_v1.bin\`.
+          - Consoles with the alternate MediaTek PCI Wi-Fi hardware can use Linux 7.3's in-tree \`mt7921e\` driver in this same image. It is selected only by its MediaTek PCI aliases, uses the eight firmware files already supplied by CachyOS, and gets \`disable_aspm=1\`, matching the only runtime option installed by [j4lenj's Linux 7.1.7 reference](https://github.com/j4lenj/ps5-mt7921-wifi). This build does not copy that repository's old source or binary, does not force-load \`mt7921e\`, and leaves the exact-ID-gated IW620 path unchanged. MediaTek Wi-Fi is not yet validated on firmware 11.60; this change makes no claim about MediaTek Bluetooth.
           - The boot report (\`ps5-boot-report.txt\` on the boot partition) records Bluetooth controller and module identity, temperatures, CPU/GPU clocks, the performance opt-out, session state and sleep masks. It replaces Wi-Fi network names with \`<wifi-name>\` and masks MAC addresses, but still contains IP addresses. Review and redact it and any \`dmesg\` output before posting; do not upload raw firmware, keys, the FAT partition, or unsanitized logs.
           - pacman holds \`linux-ps5\` back from updates. After a kernel or initramfs change, which an ordinary \`pacman -Syu\` can also make, a pacman hook builds a new initramfs, checks it, and updates \`bzImage\` and \`initrd.img\` on the boot partition if they pass the loader's checks. The pair it replaces is kept there as \`bzImage.prev\` and \`initrd.img.prev\`. pacman refuses a kernel change while the boot partition is not mounted read-write.
 
@@ -528,7 +529,7 @@ jobs:
 
           ### Loader
 
-          This image needs the [bounded 11.60 loader tester prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21), which is not part of this image release. Use the bounded Wi-Fi ELF for the first test. The exact Run 21 artifacts were built at \`98925a2\`; current loader \`main\` reproduces their hashes and adds direct-target and CI safeguards:
+          This image needs the [bounded 11.60 loader tester prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21), which is not part of this image release. Use the bounded Wi-Fi ELF on an IW620 console so the loader can supply that console's firmware. Use the bounded non-Wi-Fi ELF on a MediaTek console; \`mt7921e\` uses firmware already packaged in the image. The exact Run 21 artifacts were built at \`98925a2\`; current loader \`main\` reproduces their hashes and adds direct-target and CI safeguards:
 
           - \`make linux-1160-dma-e820-bounded-wifi\` for Wi-Fi, ELF sha256 \`e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f\`
           - \`make linux-1160-dma-e820-bounded\` without Wi-Fi, ELF sha256 \`1c80b040c5a808b3f09418728424a875d5598fe6b2a5d68adeb4db5979a7541a\`
@@ -572,7 +573,7 @@ jobs:
           \`\`\`
           EOF
 
-          title="CachyOS 7.3.0 for PS5 firmware 11.60 ($TAG)"
+          title="CachyOS 7.3.0 MediaTek candidate for PS5 firmware 11.60 ($TAG)"
           assets=(ps5-cachyos1160-k73.img.xz SHA256SUMS build-info.txt \
             cachyos1160-k73-root-changes.txt)
           if is_draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
@@ -622,7 +623,7 @@ jobs:
             echo "gh run download $GITHUB_RUN_ID -R $GITHUB_REPOSITORY -n cachyos1160-k73-release-files -D release-files"
             echo "cd release-files && sha256sum -c --ignore-missing SHA256SUMS"
             echo "gh release create $TAG -R $GITHUB_REPOSITORY --draft --prerelease --target $GITHUB_SHA \\"
-            echo "  --title 'CachyOS 7.3.0 for PS5 firmware 11.60 ($TAG)' --notes-file release-notes.md \\"
+            echo "  --title 'CachyOS 7.3.0 MediaTek candidate for PS5 firmware 11.60 ($TAG)' --notes-file release-notes.md \\"
             echo "  ps5-cachyos1160-k73.img.xz SHA256SUMS build-info.txt cachyos1160-k73-root-changes.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

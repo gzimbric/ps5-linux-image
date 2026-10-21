@@ -96,7 +96,7 @@ check_initramfs() { # initramfs
   done
   grep -qxF etc/modprobe.d/ps5-amdgpu.conf <<<"$contents" || missing+=(ps5-amdgpu.conf)
   ((${#missing[@]} == 0)) || die "$1 is missing ${missing[*]}"
-  if grep -Eq '(^|/)((mlan|moal|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' \
+  if grep -Eq '(^|/)((mlan|moal|mt7921e|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' \
     <<<"$contents"; then
     die "$1 has the Wi-Fi driver, its firmware or a frequency driver"
   fi

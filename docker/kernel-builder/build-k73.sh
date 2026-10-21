@@ -15,8 +15,8 @@
 # The patch set is the 7.3 port by rmux (Armandas Kvietkus) in
 # rmuxnet/ps5-linux-patches-1. A byte-for-byte, hash-pinned follow-up from the
 # ps5-bazzite-deck v1.0.3 release makes the IW620 Bluetooth quirks in that port
-# take effect. The only config change made here is building the two PS5
-# frequency drivers as modules.
+# take effect. The config changes made here build the two PS5 frequency
+# drivers and Linux 7.3's in-tree MT7921 PCI Wi-Fi driver as modules.
 set -euo pipefail
 
 LINUX_COMMIT=c03c1a14507dfaf8b856c2608f9ac216021fc222   # tag v7.3
@@ -35,7 +35,7 @@ CHECK=/repo/distros/cachyos1160-k73/files/ps5-1160-check-boot-files
 export KBUILD_BUILD_USER=ps5
 export KBUILD_BUILD_HOST=ps5-linux-image
 export KBUILD_BUILD_TIMESTAMP='Sun Oct 18 16:00:53 UTC 2026'
-export KBUILD_BUILD_VERSION=3
+export KBUILD_BUILD_VERSION=4
 export TZ=UTC
 export LC_ALL=C
 export CCACHE_DISABLE=1
@@ -108,16 +108,25 @@ step "Config"
 cp /ps5-linux-patches/.config .config
 # Build the CPU and GPU frequency drivers as modules. Neither has a module
 # alias, so only the image's guarded startup service can load them explicitly.
-scripts/config --file .config --module X86_PS5_CPUFREQ --module PS5_GPUFREQ
+# MT7921E stays on the normal PCI modalias path and is never force-loaded.
+scripts/config --file .config --module X86_PS5_CPUFREQ --module PS5_GPUFREQ \
+  --module MT7921E
 make -s olddefconfig
 config_is CONFIG_X86_PS5_CPUFREQ m
 config_is CONFIG_PS5_GPUFREQ m
+config_is CONFIG_MT76_CORE m
+config_is CONFIG_MT76_CONNAC_LIB m
+config_is CONFIG_MT792x_LIB m
+config_is CONFIG_MT7921_COMMON m
+config_is CONFIG_MT7921E m
 config_is CONFIG_X86_PS5 y
 config_is CONFIG_RANDOMIZE_BASE y
 config_is CONFIG_RELOCATABLE y
 config_is CONFIG_OBJTOOL y
 config_is CONFIG_MODVERSIONS y
 config_is CONFIG_CFG80211 m
+config_is CONFIG_FW_LOADER_COMPRESS y
+config_is CONFIG_FW_LOADER_COMPRESS_ZSTD y
 config_is CONFIG_SENSORS_K10TEMP m
 config_is CONFIG_PM_DEVFREQ y
 config_is CONFIG_DRM_AMDGPU m
@@ -128,7 +137,7 @@ grep -qx '# CONFIG_LOCALVERSION_AUTO is not set' .config
 grep -qx '# CONFIG_MODULE_SIG is not set' .config
 test "$(make -s kernelrelease)" = "$KVER"
 # Everything else should be the published config; show what olddefconfig and
-# the two module switches changed.
+# the three module switches changed.
 diff /ps5-linux-patches/.config .config > /tmp/config.diff || true
 cat /tmp/config.diff
 sha256sum .config
@@ -142,6 +151,46 @@ for module in drivers/cpufreq/ps5-cpufreq.ko drivers/devfreq/ps5-gpufreq.ko; do
   test -f "$module" || die "$module was not built"
   [ -z "$(modinfo -F alias "$module")" ] || die "$module has a module alias"
 done
+mt7921e=drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko
+test -f "$mt7921e" || die "$mt7921e was not built"
+mt_vermagic=$(modinfo -F vermagic "$mt7921e")
+test "$mt_vermagic" = "$(modinfo -F vermagic net/wireless/cfg80211.ko)" ||
+  die "mt7921e vermagic does not match cfg80211"
+case "$mt_vermagic" in
+  "$KVER "*) ;;
+  *) die "mt7921e vermagic is not for $KVER: $mt_vermagic" ;;
+esac
+mt_deps=$(modinfo -F depends "$mt7921e" | tr ',' '\n' | sort | tr '\n' ' ')
+test "$mt_deps" = 'mt76 mt76-connac-lib mt7921-common mt792x-lib ' ||
+  die "unexpected mt7921e dependencies: $mt_deps"
+mt_aliases=(
+  'pci:v000014C3d00007961sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007922sv*sd*bc*sc*i*'
+  'pci:v00000B48d00007922sv*sd*bc*sc*i*'
+  'pci:v000014C3d00000608sv*sd*bc*sc*i*'
+  'pci:v000014C3d00000616sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007920sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007902sv*sd*bc*sc*i*'
+)
+actual=$(modinfo -F alias "$mt7921e" | sort)
+expected=$(printf '%s\n' "${mt_aliases[@]}" | sort)
+test "$actual" = "$expected" || die "unexpected mt7921e PCI aliases"
+modinfo -F parm "$mt7921e" | grep -qxF 'disable_aspm:disable PCI ASPM support' ||
+  die "mt7921e does not expose the expected disable_aspm parameter"
+mt_firmware=(
+  mediatek/WIFI_MT7902_patch_mcu_1_1_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7902_1.bin
+  mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7922_1.bin
+  mediatek/WIFI_MT7961_patch_mcu_1_2_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7961_1.bin
+  mediatek/WIFI_MT7961_patch_mcu_1a_2_hdr.bin
+  mediatek/WIFI_RAM_CODE_MT7961_1a.bin
+)
+actual=$(modinfo -F firmware "$mt7921e" | sort)
+expected=$(printf '%s\n' "${mt_firmware[@]}" | sort)
+test "$actual" = "$expected" || die "unexpected mt7921e firmware declarations"
+echo "ok  mt7921e: Linux 7.3 module, dependencies, 7 PCI aliases, disable_aspm and 8 firmware names"
 ls -l arch/x86/boot/bzImage
 sha256sum arch/x86/boot/bzImage
 
@@ -176,9 +225,16 @@ for module in kernel/drivers/cpufreq/ps5-cpufreq.ko \
   kernel/drivers/devfreq/ps5-gpufreq.ko \
   kernel/drivers/hwmon/k10temp.ko \
   kernel/drivers/gpu/drm/amd/amdgpu/amdgpu.ko \
+  kernel/drivers/net/wireless/mediatek/mt76/mt76.ko \
+  kernel/drivers/net/wireless/mediatek/mt76/mt76-connac-lib.ko \
+  kernel/drivers/net/wireless/mediatek/mt76/mt792x-lib.ko \
+  kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921-common.ko \
+  kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko \
   kernel/net/wireless/cfg80211.ko; do
   test -f "$modules/$module" || die "$module is missing from the staged modules"
 done
+grep -q '^kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e\.ko:' \
+  "$modules/modules.dep" || die "mt7921e.ko is missing from staged modules.dep"
 module_count=$(find "$modules" -name '*.ko*' | wc -l)
 
 cp arch/x86/boot/bzImage /out/kernel/bzImage
@@ -197,7 +253,7 @@ cp System.map Module.symvers /out/kernel/
   echo "              firmware/amdgpu/ps5_vcn.bin $VCN_SIZE bytes, sha256 $VCN_SHA256 (built in)"
   echo "Bluetooth:    ps5-bazzite-deck v1.0.3 release asset ps5-btusb-quirks-fix.patch"
   echo "              vendored as ps5-btusb-iw620-quirks.patch sha256 $BTUSB_PATCH_SHA256"
-  echo "Config:       X86_PS5_CPUFREQ=m PS5_GPUFREQ=m, then olddefconfig; sha256 $(sha256sum .config | awk '{print $1}')"
+  echo "Config:       X86_PS5_CPUFREQ=m PS5_GPUFREQ=m MT7921E=m, then olddefconfig; sha256 $(sha256sum .config | awk '{print $1}')"
   echo "Compiler:     $(x86_64-linux-gnu-gcc --version | head -1), $(uname -m) build host"
   echo "Version:      $(strings arch/x86/boot/bzImage | awk -v k="$KVER (" 'index($0, k) == 1 && !n { print; n = 1 }')"
   echo "bzImage:      $(stat -c %s arch/x86/boot/bzImage) bytes, sha256 $(sha256sum arch/x86/boot/bzImage | awk '{print $1}')"
