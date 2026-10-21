@@ -210,11 +210,21 @@ scrub() {
     echo "[temperatures]"
     sensors 2>&1 || true
 
-    # Build 3 loads the frequency drivers after the fixed fan request unless
-    # the FAT opt-out is present. Record both the decision and the resulting
+    # This profile loads the frequency drivers after the fan target is applied
+    # unless the FAT opt-out is present. Record the policy and resulting
     # clocks and temperatures.
     echo
     echo "[thermals-and-clocks]"
+    if [ -r /etc/default/ps5-fan ]; then
+        grep -E '^PS5_FAN_TARGET_C=[0-9]+$' /etc/default/ps5-fan 2>/dev/null || true
+    fi
+    if [ -r /sys/bus/platform/devices/ps5-fan/target_temp ]; then
+        printf 'fan_target_temp_C='
+        timeout 15 cat /sys/bus/platform/devices/ps5-fan/target_temp 2>/dev/null || \
+            echo READ_FAILED
+    else
+        echo 'fan_target_temp_C=UNAVAILABLE'
+    fi
     if [ -e /boot/efi/disable-ps5-performance ]; then
         echo "performance opt-out: present"
     else

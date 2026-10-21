@@ -1,0 +1,29 @@
+#!/bin/sh
+# Set the PS5 ICC autoservo target while leaving its thermal controller active.
+set -eu
+
+target=${PS5_FAN_TARGET_C:-65}
+path=/sys/bus/platform/devices/ps5-fan/target_temp
+
+case $target in
+    4[0-9]|[5-7][0-9]|80)
+        ;;
+    *)
+        echo "PS5_FAN_TARGET_C must be an integer from 40 through 80" >&2
+        exit 64
+        ;;
+esac
+if [ ! -w "$path" ]; then
+    echo "PS5 fan target interface is unavailable: $path" >&2
+    exit 1
+fi
+
+before=$(timeout 15 cat "$path")
+printf '%s\n' "$target" >"$path"
+after=$(timeout 15 cat "$path")
+if [ "$after" != "$target" ]; then
+    echo "PS5 fan target readback mismatch: requested $target, got $after" >&2
+    exit 1
+fi
+
+printf 'PS5 fan autoservo target: %s C -> %s C\n' "$before" "$after"

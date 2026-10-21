@@ -27,6 +27,11 @@ hosted results separate when reporting tests.
 > console-dumped
 > `pcieuartiw620_combo_v1.bin`, and redact reports before posting them.
 
+> **Fan-policy identity:** the published Image 3 archive below still contains
+> the legacy servo-pattern `3` helper. Current `main` replaces it with a
+> read-back-verified 65 C autoservo target for the next image. The source-tree
+> correction is not present in the published Image 3 hash.
+
 The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
 (sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
@@ -157,10 +162,11 @@ that were manual in Run 21:
   internal adapter on the local 11.60 system, with no USB controller present.
   The exact hosted image still needs its own pairing result and a long
   Wi-Fi/Bluetooth coexistence test.
-- **Fan:** requests fixed maximum servo pattern `3` before the performance
-  policy starts. The tested CFI-1115B reports an unknown fan revision, so the
-  dynamic fan table does not update on that console. This is a conservative
-  bring-up request, not a calibrated curve, and physical RPM is unmeasured.
+- **Fan:** published Image 3 requests legacy servo pattern `3`; on the tested
+  console that left the autoservo target at 86 C and did not prove maximum
+  speed. The next-build source on `main`, included in this candidate, instead
+  sets 65 C before the performance policy and fails the service if readback
+  does not match. Apply the hotfix below when testing the published archive.
 - **Performance:** after the fan service succeeds,
   `ps5-performance.service` verifies `amdgpu dpm=0`, loads `ps5_gpufreq`
   before `ps5_cpufreq`, checks GPU `simple_ondemand` and CPU `schedutil`, and
@@ -190,6 +196,27 @@ VCN video decode, storage integrity and broader hardware coverage remain test
 gaps until recorded otherwise. The
 [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md)
 contains the exact release hashes, boot steps and result checklist.
+
+## Published Image 3 fan hotfix
+
+After each boot of the published Image 3 archive, set and verify a 65 C
+autoservo target:
+
+```bash
+echo 65 | sudo tee /sys/bus/platform/devices/ps5-fan/target_temp
+cat /sys/bus/platform/devices/ps5-fan/target_temp
+```
+
+The kernel's automatic controller remains active. Use 40-80 C; lower values
+cool more aggressively. On the tested CFI-1115B, a bounded 20 C diagnostic
+demand made the fan clearly audible and reduced Tctl from 35.75 C to about
+33 C in 28 seconds. Linux exposes no chassis-fan RPM/tachometer value.
+
+Current `main` and this candidate make the 65 C policy persistent for the next
+image through `/etc/default/ps5-fan`, verify immediate readback, remove the
+misleading `ps5_fan_max` helper and record the active target in
+`ps5-boot-report.txt`. Those files are not present in the published Image 3
+identity above.
 
 ## Patch provenance and credit
 
@@ -426,9 +453,9 @@ The full list is in [`root-changes.expected`](root-changes.expected). The
 cachyos1160 changes carry over: hostname `ps5` (the base image has no
 `/etc/hostname`, so no build host name can leak in), `127.0.1.1 ps5`, UTC,
 the first-boot marker, the GPU firmware and `ps5-amdgpu.conf`, the fan
-helper, display re-detect, the boot report, and `mts` for Ethernet. The
+service ordering, display re-detect, the boot report, and `mts` for Ethernet. The
 official image's `grow-rootfs`, `sshd` with password login, and `steam`
-autologin on `tty1` remain in place. Image 3 changes the initial session token
+autologin on `tty1` remain in place. This profile changes the initial session token
 to Plasma, replaces the session-selection helper needed for the bounded
 handoff, and replaces the Gamescope launcher so Steam starts with the tested
 `-steamos -gamepadui` flags. Plasma resets the one-shot token to Gaming Mode
@@ -477,15 +504,17 @@ What is different:
   `UserspaceHID=true`; `uhid` and `hid-playstation` are built for this kernel.
   This path passed with a DualSense on the local 11.60 system. The exact
   hosted image still needs its own pairing result.
-- **Fan.** `ps5fan.service` is enabled and runs at boot. It asks the ICC for
-  maximum fan servo pattern `3` as a fixed bring-up setting, before the
-  performance service. The tested CFI-1115B reports an unknown fan revision
-  and rejects the dynamic-table update path, so a dynamic curve is not used.
-  Pattern 3 is not a temperature-controlled or calibrated curve, and a
-  successful request does not prove the physical RPM.
+- **Fan.** `ps5fan.service` is enabled and runs before the performance service.
+  It leaves the ICC's automatic thermal controller active, sets its target to
+  65 C and checks the value by reading the kernel interface back. To choose a
+  different balance, edit `PS5_FAN_TARGET_C` in `/etc/default/ps5-fan` (40-80
+  C) and restart `ps5fan.service`; lower values cool more aggressively. The
+  tested CFI-1115B accepted target changes and audibly ramped during a bounded
+  20 C diagnostic demand test. Linux exposes temperature and target data here, but no
+  chassis-fan RPM/tachometer reading.
 - **Frequency drivers.** `ps5-cpufreq.ko` and `ps5-gpufreq.ko` are part of
   the kernel package but remain absent from the initramfs and generic
-  modules-load files. Image 3 enables `ps5-performance.service` after the fan
+  modules-load files. This profile enables `ps5-performance.service` after the fan
   service succeeds. It requires `amdgpu dpm=0`, loads the GPU module before
   the CPU module, verifies GPU governor `simple_ondemand` and CPU governor
   `schedutil`, and disables CPU boost. Both were exercised manually in Run

@@ -18,8 +18,7 @@
 #
 # Run as root on Linux x86_64 (a GitHub ubuntu-24.04 runner, or a privileged
 # linux/amd64 container). Host tools: curl (only when downloading), xz,
-# util-linux, e2fsprogs, dosfstools, gcc with static glibc (libc6-dev on
-# Debian/Ubuntu) and binutils.
+# util-linux, e2fsprogs, dosfstools and binutils.
 set -euo pipefail
 shopt -s inherit_errexit
 export LC_ALL=C
@@ -165,7 +164,7 @@ done
 [[ $(uname -s) == Linux ]] || die "run on Linux"
 [[ $(uname -m) == x86_64 ]] || die "run on x86_64 (or in a linux/amd64 container)"
 
-required=(awk blkid chroot cmp dd diff e2fsck find fsck.fat gcc install join
+required=(awk blkid chroot cmp dd diff e2fsck find fsck.fat install join
   unshare losetup mount mountpoint nproc od partx readelf realpath sed
   sha256sum sort stat umount xargs xz)
 [[ -n $base_xz ]] || required+=(curl)
@@ -188,7 +187,8 @@ for f in README.md cmdline.txt root-changes.expected config/ps5-amdgpu.conf \
   tools/build_1160_initrd.sh files/hostname files/ps5-ethernet.conf \
   files/ps5-amdgpu-reprobe files/ps5-amdgpu-reprobe.service \
   files/ps5-boot-report files/ps5-boot-report.service \
-  files/ps5-boot-report.timer files/ps5_fan_max.c files/ps5fan.service \
+  files/ps5-boot-report.timer files/ps5-fan.conf files/ps5-fan-target \
+  files/ps5fan.service \
   files/ps5-iw620.conf files/ps5-iw620-firmware files/ps5-iw620-firmware.service \
   files/ps5-mt7921e.conf \
   files/20-ps5-iw620.conf files/ps5-performance files/ps5-performance.service \
@@ -370,23 +370,6 @@ echo "ok  $P2_SHA256  p2 region before changes"
 [[ $(region_sha "$P1_START" "$P1_SECTORS") == "$P1_SHA256" ]] ||
   die "p1 (root) region does not match the official image"
 echo "ok  $P1_SHA256  p1 region before changes"
-
-# ------------------------------------------------------------- fan helper
-
-log "Fan helper"
-fan_bin=$work/ps5_fan_max
-rm -f -- "$fan_bin"
-gcc -O2 -static -o "$fan_bin" "$PROFILE/files/ps5_fan_max.c"
-elf_header=$(readelf -h "$fan_bin")
-[[ $elf_header =~ Machine:[[:space:]]+Advanced\ Micro\ Devices\ X86-64 ]] ||
-  die "ps5_fan_max is not an x86_64 binary"
-elf_segments=$(readelf -l "$fan_bin")
-[[ $elf_segments != *'program interpreter'* ]] || die "ps5_fan_max is not statically linked"
-fan_size=$(stat -c %s -- "$fan_bin")
-fan_sha=$(sha "$fan_bin")
-gcc_version=$(gcc --version)
-echo "${gcc_version%%$'\n'*}"
-echo "ps5_fan_max: static x86_64, $fan_size bytes, sha256 $fan_sha"
 
 # ----------------------------------------------------- partitions, before
 
@@ -642,7 +625,8 @@ add_link /usr/share/zoneinfo/UTC etc/localtime
 install -o 0 -g 0 -m 0644 /dev/null "$R/etc/ps5-first-boot-done"
 
 log "Fan"
-add_file 0755 "$fan_bin" usr/local/sbin/ps5_fan_max
+add_file 0644 "$PROFILE/files/ps5-fan.conf" etc/default/ps5-fan
+add_file 0755 "$PROFILE/files/ps5-fan-target" usr/local/sbin/ps5-fan-target
 add_file 0644 "$PROFILE/files/ps5fan.service" etc/systemd/system/ps5fan.service
 add_link /etc/systemd/system/ps5fan.service \
   etc/systemd/system/multi-user.target.wants/ps5fan.service
@@ -852,7 +836,6 @@ leftover=$(comm -23 <(sort -u "$work/package-old.paths") <(sort -u "$work/packag
 [[ -z $leftover ]] || die "files of $OLD_PACKAGE were left behind: ${leftover//$'\n'/ }"
 
 sed -e '/^#/d' -e '/^$/d' \
-  -e "s/@PS5_FAN_MAX_SIZE@/$fan_size/" -e "s/@PS5_FAN_MAX_SHA256@/$fan_sha/" \
   -e "s/@MLAN_SIZE@/$mlan_size/" -e "s/@MLAN_SHA256@/$mlan_sha/" \
   -e "s/@MOAL_SIZE@/$moal_size/" -e "s/@MOAL_SHA256@/$moal_sha/" \
   -e "s/@INITRD_SIZE@/$initrd_size/" -e "s/@INITRD_SHA256@/$initrd_sha/" \
