@@ -52,9 +52,6 @@ on:
       - 'docker/kernel-builder/repro-date'
       - 'distros/cachyos1160-k73/kernel/**'
       - 'distros/cachyos1160-k73/files/ps5-1160-check-boot-files'
-    tags:
-      - 'cachyos1160-k73-image-*'
-
 permissions:
   contents: read
 
@@ -218,7 +215,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload kernel
-        if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v6
         with:
           name: linux-ps5-k73
@@ -233,7 +230,7 @@ jobs:
 
   image:
     needs: kernel
-    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
@@ -501,7 +498,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag || format('cachyos1160-k73-build-{0}', github.run_number) }}
+          TAG: ${{ inputs.release_tag || format('cachyos1160-k73-build-{0}', github.run_number) }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -615,7 +612,7 @@ jobs:
       - name: Say how to finish the release
         if: failure() && steps.release.outcome == 'failure'
         env:
-          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag || format('cachyos1160-k73-build-{0}', github.run_number) }}
+          TAG: ${{ inputs.release_tag || format('cachyos1160-k73-build-{0}', github.run_number) }}
         run: |
           {
             echo "Creating the draft release failed. The release files are in the"
