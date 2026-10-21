@@ -42,7 +42,14 @@ reporting tests.
 > `systemd-networkd-wait-online.service` enabled even though NetworkManager owns
 > networking. Its two-minute timeout was the only failed unit and did not
 > interrupt networking or SSH. Use the tester guide's published-image cleanup;
-> the current next-image source removes the stale enablement.
+> the current next-image source masks the redundant unit before first boot.
+
+> **Network-policy identity:** the published Image 3 archive does not contain
+> the NetworkManager PolicyKit rule now in current source. Installing that exact
+> rule live fixed the authentication prompt after a Gaming Mode → Plasma
+> handoff: checks against the actual `plasmashell` and `kded6` processes were
+> authorized and an unprivileged Wi-Fi rescan passed. The rule applies only to
+> user `steam` and nine ordinary NetworkManager desktop actions.
 
 The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
@@ -498,7 +505,14 @@ What is different:
   CFI-1115B, this stopped KDE from selecting an access-point object that the
   IW620 scan cycle had already invalidated. A WPA3-SAE network then joined from
   the normal Plasma menu, obtained DHCP and completed an HTTPS request over
-  Wi-Fi.
+  Wi-Fi. For the next image, the profile also installs the exact live-tested
+  [`49-ps5-networkmanager.rules`](files/49-ps5-networkmanager.rules). It lets
+  only the dedicated `steam` user enable or disable networking and Wi-Fi,
+  control connections, modify own or system connection profiles, scan or
+  share Wi-Fi, and control NetworkManager's connectivity check. It does not
+  grant NetworkManager reload, hostname, global-DNS, WWAN, sleep, checkpoint
+  or statistics actions. The published Image 3 hash does not contain this
+  rule.
 - **Bluetooth.** The kernel applies the exact, hash-pinned Bazzite Deck v1.0.3
   source patch after rmux's patch set. It makes the IW620 quirks win over
   btusb's earlier generic class match and applies the IW620 interface

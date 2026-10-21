@@ -5,9 +5,9 @@
 # that rewrites the image (CI zeroes the free blocks of the root filesystem
 # first). It checks what has to be true on the console: the FAT boot files
 # and the bounded loader's limits, the kernel and its modules, the Wi-Fi
-# driver and the absence of its firmware, the guarded frequency-driver
-# startup, the enabled services, the kernel hold and
-# the boot-file hook, and the account and SSH hygiene.
+# driver and the absence of its firmware, the narrow NetworkManager policy,
+# the guarded frequency-driver startup, the enabled services, the kernel hold
+# and the boot-file hook, and the account and SSH hygiene.
 #
 # Usage: sudo scripts/verify-cachyos1160-k73-image.sh --image IMG [--kernel-dir DIR]
 #
@@ -23,6 +23,7 @@ IMAGE_SIZE=12582912000
 P1_START=1024000 P1_SECTORS=23549952
 P2_START=2048 P2_SECTORS=1021952
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
+NM_POLKIT_SHA256=4c903eabb706866632f43b35a7de08557bc4708d04f3d4b52fed5088347153c3
 
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PROFILE=$REPO/distros/cachyos1160-k73
@@ -160,6 +161,36 @@ for setting in \
     die "NetworkManager IW620 setting is missing: $setting"
 done
 ok "IW620 driver installed, udev alias load blocked, no firmware, stable MAC and power settings applied"
+
+# Plasma's NetworkManager helpers can lose their active-seat association when
+# tty1 switches between Gaming Mode and Plasma. Keep the exception narrow:
+# only the dedicated steam account and only the ordinary actions exercised by
+# the desktop network UI.
+nm_polkit=$R/etc/polkit-1/rules.d/49-ps5-networkmanager.rules
+same "$nm_polkit" "$PROFILE/files/49-ps5-networkmanager.rules" \
+  "/etc/polkit-1/rules.d/49-ps5-networkmanager.rules"
+[[ $(sha "$nm_polkit") == "$NM_POLKIT_SHA256" ]] ||
+  die "the NetworkManager polkit rule does not match the live-tested policy"
+grep -qF 'if (subject.user != "steam") {' "$nm_polkit" ||
+  die "the NetworkManager polkit rule is not limited to user steam"
+nm_actions=$(sed -nE \
+  's/^[[:space:]]*"(org\.freedesktop\.NetworkManager\.[^"]+)",?$/\1/p' \
+  "$nm_polkit" | sort)
+expected_nm_actions=$(printf '%s\n' \
+  org.freedesktop.NetworkManager.enable-disable-connectivity-check \
+  org.freedesktop.NetworkManager.enable-disable-network \
+  org.freedesktop.NetworkManager.enable-disable-wifi \
+  org.freedesktop.NetworkManager.network-control \
+  org.freedesktop.NetworkManager.settings.modify.own \
+  org.freedesktop.NetworkManager.settings.modify.system \
+  org.freedesktop.NetworkManager.wifi.scan \
+  org.freedesktop.NetworkManager.wifi.share.open \
+  org.freedesktop.NetworkManager.wifi.share.protected | sort)
+[[ $nm_actions == "$expected_nm_actions" ]] ||
+  die "the NetworkManager polkit action allowlist changed"
+[[ $(grep -cF 'return polkit.Result.YES;' "$nm_polkit") == 1 ]] ||
+  die "the NetworkManager polkit rule has an unexpected authorization result"
+ok "live-tested NetworkManager polkit rule is limited to steam and nine desktop actions"
 
 # --------------------------------------------------------------- Bluetooth
 

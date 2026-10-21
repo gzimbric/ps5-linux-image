@@ -25,6 +25,7 @@ M etc/pacman.conf f 0644 0 0 3019 9aa21b480b54adea829ee5b69f63ad421807a9d313fa0a
 A etc/pacman.d/hooks d 0755 0 0 - -
 A etc/pacman.d/hooks/05-ps5-boot-files-precheck.hook f 0644 0 0 771 7b10d6ba934773c5ffce9da14f7cdf3acdcf946e2947c9ac9a3c3c7f8a5b188e
 A etc/pacman.d/hooks/95-ps5-boot-files.hook f 0644 0 0 854 118706039c4435455cbc59e25431ee8ab5e18a56abd6a41e99cafd2cb9b1a995
+A etc/polkit-1/rules.d/49-ps5-networkmanager.rules f 0644 0 0 1144 4c903eabb706866632f43b35a7de08557bc4708d04f3d4b52fed5088347153c3
 A etc/ps5-first-boot-done f 0644 0 0 0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 A etc/systemd/system/hibernate.target l 0777 0 0 - /dev/null
 A etc/systemd/system/hybrid-sleep.target l 0777 0 0 - /dev/null

@@ -6,9 +6,10 @@
 # 52db0a4), replaces its linux-ps5 7.1.7 kernel with the 7.3.0 package from
 # scripts/build-linux-ps5-k73.sh and scripts/package-linux-ps5-k73.sh, adds
 # the IW620 Wi-Fi modules built for that kernel, applies the
-# distros/cachyos1160-k73 profile, builds the initramfs, and writes the new
-# boot files to the FAT partition. Every step is checked, and the build stops
-# at the first mismatch. See distros/cachyos1160-k73/README.md.
+# distros/cachyos1160-k73 profile (including the narrow Plasma NetworkManager
+# policy), builds the initramfs, and writes the new boot files to the FAT
+# partition. Every step is checked, and the build stops at the first mismatch.
+# See distros/cachyos1160-k73/README.md.
 #
 # The boot files are not the exact sizes the earlier 11.60 loaders require.
 # The image needs a bounded 11.60 loader build (linux-1160-dma-e820-bounded or
@@ -67,6 +68,7 @@ OLD_FAT_BZIMAGE_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee3
 # Bluetooth helper the base image runs at boot.
 BT_QUIET_SHA256=d31222ead065ee2ab6fd55edda285741814bb8a470c9c26d355963ab39b46240
 BT_QUIET_SERVICE_SHA256=4cc7b16adbc3ef4d4a132d55e7e0bacd4e9bc9192096507d6e125301d821f32c
+NM_POLKIT_SHA256=4c903eabb706866632f43b35a7de08557bc4708d04f3d4b52fed5088347153c3
 OLD_SESSION_SELECT_SHA256=f6fb96619489228225ccbc2d7f782d5791c5a2e6d9f66f5d0f843d64d35d1f74
 OLD_GAMESCOPE_SESSION_SHA256=5b50d084becac615c8a27670f79d99d7aa9bbbfcd40ba50e3903005e493cb85a
 OLD_NEXT_SESSION_SHA256=df84d3e62a7e09d6ec7a9f6bb3f2f2060eed95618c315ac0ea2f6d62efd91b0e
@@ -169,7 +171,8 @@ for f in README.md cmdline.txt root-changes.expected config/ps5-amdgpu.conf \
   files/ps5-boot-report.timer files/ps5-fan.conf files/ps5-fan-target \
   files/ps5fan.service \
   files/ps5-iw620.conf files/ps5-iw620-firmware files/ps5-iw620-firmware.service \
-  files/20-ps5-iw620.conf files/ps5-performance files/ps5-performance.service \
+  files/20-ps5-iw620.conf files/49-ps5-networkmanager.rules \
+  files/ps5-performance files/ps5-performance.service \
   files/ps5-bt-quiet files/ps5-bt-quiet.service \
   files/ps5-1160-check-boot-files files/ps5-update-boot-files \
   files/05-ps5-boot-files-precheck.hook files/95-ps5-boot-files.hook; do
@@ -185,6 +188,8 @@ expect_file "$PROFILE/cmdline.txt" "${FAT_SIZE[cmdline.txt]}" \
 expect_sha "$PROFILE/files/ps5-bt-quiet" "$BT_QUIET_SHA256" "profile ps5-bt-quiet"
 expect_sha "$PROFILE/files/ps5-bt-quiet.service" "$BT_QUIET_SERVICE_SHA256" \
   "profile ps5-bt-quiet.service"
+expect_file "$PROFILE/files/49-ps5-networkmanager.rules" 1144 \
+  "$NM_POLKIT_SHA256" "profile 49-ps5-networkmanager.rules"
 
 mkdir -p -- "$work" "$out_dir"
 R=$work/root   # root filesystem, mounted read-write for the chroot
@@ -441,6 +446,8 @@ add_file 0644 "$iw620/moal.ko" "$updates/ps5-iw620/moal.ko"
 add_file 0644 "$PROFILE/files/ps5-iw620.conf" etc/modprobe.d/ps5-iw620.conf
 add_file 0644 "$PROFILE/files/20-ps5-iw620.conf" \
   etc/NetworkManager/conf.d/20-ps5-iw620.conf
+add_file 0644 "$PROFILE/files/49-ps5-networkmanager.rules" \
+  etc/polkit-1/rules.d/49-ps5-networkmanager.rules
 add_file 0755 "$PROFILE/files/ps5-iw620-firmware" usr/local/sbin/ps5-iw620-firmware
 add_file 0644 "$PROFILE/files/ps5-iw620-firmware.service" \
   etc/systemd/system/ps5-iw620-firmware.service
