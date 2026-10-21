@@ -67,7 +67,7 @@ Each installation generates its own SSH host keys on first boot. No SSH host pri
 
 - Use Ethernet for the current profile. The PS5's onboard IW620 Wi-Fi modules are deliberately omitted and blacklisted because the successful control package did not contain a working IW620 driver and firmware combination.
 - Run 17 later brought up the onboard Wi-Fi on an installed copy of this image by adding NXP `mlan`/`moal` modules built for this exact kernel and the console's own firmware. The Ubuntu profile was not changed for that test, and images built from it still omit and blacklist the driver. The build, firmware location, and load scripts are in the porting repository's [Wi-Fi guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/ubuntu2404-wifi.md).
-- The Ubuntu profile still uses the earlier servo-pattern `3` helper. Its ICC request was accepted, but it has no RPM readback and must not be described as proven maximum speed. The CachyOS 7.3 next-build source documented below replaces that helper with a read-back-verified autoservo target; the Ubuntu migration still needs its own image test.
+- The Ubuntu profile still uses the earlier servo-pattern `3` helper. Its ICC request was accepted, but it has no RPM readback and must not be described as proven maximum speed. CachyOS 7.3 Image 4, documented below, replaces that helper with a read-back-verified autoservo target; the Ubuntu migration still needs its own image test.
 - The boot-report service writes `ps5-boot-report.txt` to the FAT boot partition for systems without UART. That report can contain network addresses, MAC addresses, connection names, and journal identifiers. Review and redact it before posting it publicly.
 
 ### Tested boot envelope
@@ -188,9 +188,9 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 - Published Image 3 also leaves `systemd-networkd-wait-online` enabled even
   though NetworkManager owns the network. Its two-minute timeout was the only
   failed unit and did not interrupt networking or SSH. The tester guide removes
-  the unused enablement and clears the failed state. Current next-image source
-  masks the unit before first boot so the vendor preset cannot enable it; that
-  correction is not part of the published hash.
+  the unused enablement and clears the failed state. Image 4 masks the unit
+  before first boot so the vendor preset cannot enable it; that correction is
+  not part of the published Image 3 hash.
 - Linux sleep and hibernate are disabled. Fully shut Linux down between loader
   attempts.
 
@@ -210,7 +210,7 @@ before posting them because they can contain network details.
 | Sessions | Plasma on first boot, Steam with `-steamos -gamepadui`, and working legacy session-selector integration |
 | Sleep | Unsupported Linux sleep, suspend and hibernate targets masked |
 
-#### Image 3 fan hotfix and next-build correction
+#### Image 3 fan hotfix and Image 4 correction
 
 The published Image 3 hashes below contain the legacy pattern helper. On the
 tested CFI-1115B it left the autoservo target at 86 C, so the helper must not
@@ -223,10 +223,10 @@ cat /sys/bus/platform/devices/ps5-fan/target_temp
 ```
 
 The supported public range is 40-80 C; lower values cool more aggressively.
-Current `main` contains the persistent correction for the next image: it
+The persistent correction shipped in [Image 4](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-4): it
 removes the legacy helper, applies 65 C at boot, checks the controller readback
 and records the target in the boot report. That change is **not** part of the
-published Image 3 archive or hashes.
+published Image 3 archive or hashes, and Image 4 has not been booted yet.
 
 The exact hosted image has now passed one cold boot on the 11.60 test console.
 All five boot files matched the release identities, the root filesystem grew to
@@ -234,8 +234,8 @@ fill the 248 GB test drive, Plasma joined Wi-Fi and passed traffic bound to that
 interface, the internal Bluetooth controller paired and automatically
 reconnected a DualSense, and the full Plasma → Gaming Mode → Plasma handoff
 passed without compositor overlap. The returned Plasma session then needed the
-tester guide's live Polkit hotfix before KDE could control NetworkManager; the
-current next-image source carries that correction. The startup frequency policy
+tester guide's live Polkit hotfix before KDE could control NetworkManager;
+Image 4 carries that correction. The startup frequency policy
 also reached GPU `simple_ondemand`, CPU `schedutil` and CPU boost off. With the 65 C fan
 hotfix active, a 20-second, 16-worker CPU load held the CPU near 3.19 GHz,
 peaked at 47 C and returned to 37 C three seconds after the load ended. This is
@@ -245,7 +245,7 @@ thermal/stability run, performance opt-out, storage integrity and video decode
 remain open. The
 published fan service still left the target at 86 C; the documented per-boot
 hotfix changed its readback to 65 C for this session, but RPM is not exposed and
-the persistent `main` correction is not in the archive. To skip the
+the persistent Image 4 correction is not in the Image 3 archive. To skip the
 experimental startup clock policy, create an empty
 `/boot/efi/disable-ps5-performance` file and fully power off before the next
 boot. Do not unload the frequency modules as a rollback; unloading does not
@@ -271,9 +271,29 @@ the USB; neither the loader nor this image contains that firmware. Older 11.60
 loaders refuse these boot-file sizes, and the similarly named
 `linux-1160-dma-e820-wifi` target is not the bounded build.
 
-### Next unified image source
+### Image 4 tester prerelease
 
-Current `main` builds one `linux-ps5 7.3.0-4` image for both onboard Wi-Fi
+[Image 4](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-4)
+is a public tester prerelease that has **not been booted on hardware yet**.
+Image 3 remains the newest CachyOS image with an identity-verified hardware
+boot. To test Image 4, follow the
+[Image 4 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-4-tester-guide.md).
+
+| Item | Value |
+|------|-------|
+| Release | [`cachyos1160-k73-image-4`](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-4), public prerelease |
+| Source | `e82cefaac9f4c166b4b961ea64597bb5a2a1d1e3` |
+| CI | [workflow `39536824124`](https://github.com/gzimbric/ps5-linux-image/actions/runs/39536824124), successful |
+| Kernel | `linux-ps5 7.3.0-4` |
+| Archive | `ps5-cachyos1160-k73.img.xz`, 1,942,499,200 bytes, SHA-256 `bc83fc06b78c4b1f34498fc4f9657bcf84483ee5c3268e48047ad844dd8b7380` |
+| Raw image | 12,582,912,000 bytes, SHA-256 `b8346c5d8c34e643926f7c6a5d58c0017b0de8b18f944dcf7869a31759e971d5` |
+| Hardware status | Not booted; MediaTek Wi-Fi is experimental and untested on 11.60; MediaTek Bluetooth is unknown |
+
+CI passed the image verifier, the bounded-loader limits and the single-file
+check. That covers the software checks, not a hardware boot. The archive is one
+file; verify `SHA256SUMS` before flashing.
+
+Image 4 is one `linux-ps5 7.3.0-4` image for both onboard Wi-Fi
 variants. The proven Marvell IW620 path remains exact-ID gated at
 `1b4b:2b56`. Matching MediaTek hardware can use Linux 7.3's in-tree
 `mt7921e` driver; the known PS5 device ID is `14c3:7961`. The image includes
@@ -283,13 +303,18 @@ the runtime setting in
 copying its older Linux 7.1.7 driver source or binaries. Neither Wi-Fi driver
 is force-loaded on the other chipset.
 
-The exact unified 7.3.0-4 image has not been booted. MediaTek Wi-Fi is
-structurally validated by the build and source checks but has not been tested
-on 11.60 hardware; the MediaTek Bluetooth path and hardware remain unknown.
-The Image 3 hardware result does not transfer to this new kernel or image.
-IW620 systems still use the bounded Wi-Fi ELF so the loader can supply the
-console's firmware. MediaTek systems use the bounded non-Wi-Fi ELF because
-their firmware is already packaged in the image.
+MediaTek Wi-Fi is structurally validated by the build and source checks but
+has not been tested on 11.60 hardware; the MediaTek Bluetooth path and hardware
+remain unknown. The Image 3 hardware result does not transfer to this new
+kernel or image. Both loaders are in the
+[bounded loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
+IW620 systems still use the bounded Wi-Fi ELF,
+`ps5-linux-loader-1160-dma-e820-bounded-wifi.elf`
+(`e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f`), so the
+loader can supply the console's firmware. MediaTek systems use the bounded
+non-Wi-Fi ELF, `ps5-linux-loader-1160-dma-e820-bounded.elf`
+(`1c80b040c5a808b3f09418728424a875d5598fe6b2a5d68adeb4db5979a7541a`), because
+their firmware is already packaged in the image. That ELF has not been booted.
 
 ### Build it from source
 

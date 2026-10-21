@@ -17,7 +17,7 @@ Wi-Fi, internal-Bluetooth DualSense input and both directions of the session
 handoff passed. Keep that result separate from the earlier local image when
 reporting tests.
 
-> **Tester warning:** The current download is the public
+> **Tester warning:** The newest hardware-booted download is the public
 > [Image 3 prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-3).
 > Its hosted build and structural checks passed, followed by one successful
 > exact-image boot on a CFI-1115B. This remains a prerelease with repeated-boot,
@@ -34,31 +34,34 @@ reporting tests.
 > `pcieuartiw620_combo_v1.bin`, and redact reports before posting them.
 
 > **Fan-policy identity:** the published Image 3 archive below still contains
-> the legacy servo-pattern `3` helper. Current `main` replaces it with a
-> read-back-verified 65 C autoservo target for the next image. The source-tree
-> correction is not present in the published Image 3 hash.
+> the legacy servo-pattern `3` helper. Image 4 replaces it with a
+> read-back-verified 65 C autoservo target. That correction is not present in
+> the published Image 3 hash.
 
 > **Wait-online identity:** the published archive also leaves
 > `systemd-networkd-wait-online.service` enabled even though NetworkManager owns
 > networking. Its two-minute timeout was the only failed unit and did not
 > interrupt networking or SSH. Use the tester guide's published-image cleanup;
-> the current next-image source masks the redundant unit before first boot.
+> Image 4 masks the redundant unit before first boot.
 
 > **Network-policy identity:** the published Image 3 archive does not contain
-> the NetworkManager PolicyKit rule now in current source. Installing that exact
-> rule live fixed the authentication prompt after a Gaming Mode → Plasma
-> handoff: checks against the actual `plasmashell` and `kded6` processes were
-> authorized and an unprivileged Wi-Fi rescan passed. The rule applies only to
-> user `steam` and nine ordinary NetworkManager desktop actions.
+> the NetworkManager PolicyKit rule now in current source and Image 4.
+> Installing that exact rule live fixed the authentication prompt after a
+> Gaming Mode → Plasma handoff: checks against the actual `plasmashell` and
+> `kded6` processes were authorized and an unprivileged Wi-Fi rescan passed.
+> The rule applies only to user `steam` and nine ordinary NetworkManager
+> desktop actions.
 
 The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
 (sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
 
-## Current main: one image for both Wi-Fi variants
+## Image 4: one image for both Wi-Fi variants
 
-The next-image source packages the kernel as `linux-ps5 7.3.0-4` and keeps
-the hardware paths independent:
+This source was published as the
+[Image 4 tester prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-4),
+which has not been booted on hardware. It packages the kernel as
+`linux-ps5 7.3.0-4` and keeps the hardware paths independent:
 
 - Marvell IW620 remains exact-ID gated at PCI `1b4b:2b56`. Its service only
   runs on that device and still requires the console firmware supplied by the
@@ -76,6 +79,23 @@ Wi-Fi has not yet been validated on firmware 11.60, and this change makes no
 claim about MediaTek Bluetooth. Image 3's IW620 result does not transfer to an
 artifact built from the new package. Use the bounded non-Wi-Fi loader on
 MediaTek hardware; use the bounded Wi-Fi loader on IW620 hardware.
+
+| Item | Value |
+|------|-------|
+| Release | [`cachyos1160-k73-image-4`](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-4), public prerelease |
+| Source commit | `e82cefaac9f4c166b4b961ea64597bb5a2a1d1e3` |
+| Kernel package | `linux-ps5 7.3.0-4` |
+| CI | [workflow `39536824124`](https://github.com/gzimbric/ps5-linux-image/actions/runs/39536824124): success |
+| Release archive | one `ps5-cachyos1160-k73.img.xz`; 1,942,499,200 bytes; never split |
+| Compressed SHA-256 | `bc83fc06b78c4b1f34498fc4f9657bcf84483ee5c3268e48047ad844dd8b7380` |
+| Raw image | 12,582,912,000 bytes; SHA-256 `b8346c5d8c34e643926f7c6a5d58c0017b0de8b18f944dcf7869a31759e971d5` |
+| Hardware status | unbooted |
+
+CI passed the image verifier, the bounded-loader limits and the single-file
+check. Follow the
+[Image 4 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-4-tester-guide.md)
+to test it. Image 3 below remains the newest image with an identity-verified
+hardware boot.
 
 ## Current Image 3 prerelease
 
@@ -182,7 +202,7 @@ that were manual in Run 21:
   `systemd-networkd-wait-online.service` enabled even though NetworkManager owns
   the network. Its two-minute timeout is a stale service, not an IW620 or
   Ethernet failure; the tester guide includes the published-image cleanup.
-  Current next-image source masks that unit before first boot so systemd's
+  Image 4 masks that unit before first boot so systemd's
   first-boot preset cannot recreate its enablement.
 - **Bluetooth:** replaces the image-2 follow-up with the exact
   `ps5-btusb-quirks-fix.patch` asset from Bazzite Deck v1.0.3, pinned at
@@ -198,7 +218,7 @@ that were manual in Run 21:
   Wi-Fi/Bluetooth coexistence test remain open.
 - **Fan:** published Image 3 requests legacy servo pattern `3`; on the tested
   console that left the autoservo target at 86 C and did not prove maximum
-  speed. The next-build source on `main` instead sets 65 C before the
+  speed. Image 4 instead sets 65 C before the
   performance policy and fails the service if readback does not match. Apply
   the hotfix below when testing the published archive.
 - **Performance:** after the fan service succeeds,
@@ -253,7 +273,7 @@ seconds. A later 20-second, 16-worker CPU load with the 65 C target and
 not establish thermal equilibrium or long-duration stability. Linux exposes no
 chassis-fan RPM/tachometer value.
 
-Current `main` makes the 65 C policy persistent for the next image through
+Image 4 makes the 65 C policy persistent through
 `/etc/default/ps5-fan`, verifies immediate readback, removes the misleading
 `ps5_fan_max` helper and records the active target in `ps5-boot-report.txt`.
 Those files are not present in the published Image 3 identity above.
@@ -324,11 +344,11 @@ The exact Run 21 artifacts were built at commit `98925a2`; current loader
 
 The bounded Wi-Fi build, with the `e9fe6469…` hash above, booted Run 21 on an
 IW620 console and supplied that console's IW620 firmware. The bounded non-Wi-Fi
-build intended for MediaTek hardware has not been booted. The exact unified
-7.3.0-4 image has not been booted either. Neither image 1 nor image 2 was the
-image used in Run 21, and image 2 is still unbooted. The Wi-Fi ELF does not
-contain IW620 firmware: it copies that console's own firmware to the USB at
-runtime. Do not upload or redistribute
+build intended for MediaTek hardware has not been booted. Image 4, the
+unified 7.3.0-4 image, has not been booted either. Neither image 1 nor
+image 2 was the image used in Run 21, and image 2 is still unbooted. The
+Wi-Fi ELF does not contain IW620 firmware: it copies that console's own
+firmware to the USB at runtime. Do not upload or redistribute
 `lib/nxp/pcieuartiw620_combo_v1.bin` from the boot partition or
 `/lib/firmware/nxp/pcieuartiw620_combo_v1.bin` from Linux.
 
@@ -547,7 +567,7 @@ What is different:
   CFI-1115B, this stopped KDE from selecting an access-point object that the
   IW620 scan cycle had already invalidated. A WPA3-SAE network then joined from
   the normal Plasma menu, obtained DHCP and completed an HTTPS request over
-  Wi-Fi. For the next image, the profile also installs the exact live-tested
+  Wi-Fi. Starting with Image 4, the profile also installs the exact live-tested
   [`49-ps5-networkmanager.rules`](files/49-ps5-networkmanager.rules). It lets
   only the dedicated `steam` user enable or disable networking and Wi-Fi,
   control connections, modify own or system connection profiles, scan or
