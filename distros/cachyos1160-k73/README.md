@@ -55,6 +55,28 @@ The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
 (sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
 
+## Current main: one image for both Wi-Fi variants
+
+The next-image source packages the kernel as `linux-ps5 7.3.0-4` and keeps
+the hardware paths independent:
+
+- Marvell IW620 remains exact-ID gated at PCI `1b4b:2b56`. Its service only
+  runs on that device and still requires the console firmware supplied by the
+  bounded Wi-Fi loader.
+- MediaTek hardware can use Linux 7.3's in-tree `mt7921e` driver. The known
+  PS5 device ID is `14c3:7961`; the other packaged aliases are upstream
+  driver coverage, not confirmed PS5 hardware. The module is selected by PCI
+  modalias rather than force-loaded, uses the eight firmware files declared by
+  the driver, and gets `options mt7921e disable_aspm=1`.
+
+The ASPM setting matches the only runtime option installed by
+[j4lenj's Linux 7.1.7 reference](https://github.com/j4lenj/ps5-mt7921-wifi).
+This source does not copy that repository's older driver or binaries. MediaTek
+Wi-Fi has not yet been validated on firmware 11.60, and this change makes no
+claim about MediaTek Bluetooth. Image 3's IW620 result does not transfer to an
+artifact built from the new package. Use the bounded non-Wi-Fi loader on
+MediaTek hardware; use the bounded Wi-Fi loader on IW620 hardware.
+
 ## Current Image 3 prerelease
 
 | Item | Value |
@@ -297,16 +319,18 @@ The exact Run 21 artifacts were built at commit `98925a2`; current loader
 
 | Target | ELF sha256 |
 |--------|------------|
-| `make linux-1160-dma-e820-bounded-wifi` (also writes this console's Wi-Fi firmware, see below) | `e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f` |
-| `make linux-1160-dma-e820-bounded` | `1c80b040c5a808b3f09418728424a875d5598fe6b2a5d68adeb4db5979a7541a` |
+| `make linux-1160-dma-e820-bounded-wifi` (IW620; also writes that console's Wi-Fi firmware, see below) | `e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f` |
+| `make linux-1160-dma-e820-bounded` (MediaTek; uses firmware already packaged in the image) | `1c80b040c5a808b3f09418728424a875d5598fe6b2a5d68adeb4db5979a7541a` |
 
-The bounded Wi-Fi build, with the `e9fe6469…` hash above, booted Run 21 and
-supplied the console's Wi-Fi firmware. The non-Wi-Fi bounded build has not
-been booted on hardware yet. Neither image 1 nor image 2 was the image used
-in Run 21, and image 2 is still unbooted. The ELF does not contain the Wi-Fi
-firmware: it copies this console's own firmware to the USB at runtime. Do not
-upload or redistribute `lib/nxp/pcieuartiw620_combo_v1.bin` from the boot
-partition or `/lib/firmware/nxp/pcieuartiw620_combo_v1.bin` from Linux.
+The bounded Wi-Fi build, with the `e9fe6469…` hash above, booted Run 21 on an
+IW620 console and supplied that console's IW620 firmware. The bounded non-Wi-Fi
+build intended for MediaTek hardware has not been booted. The exact unified
+7.3.0-4 image has not been booted either. Neither image 1 nor image 2 was the
+image used in Run 21, and image 2 is still unbooted. The Wi-Fi ELF does not
+contain IW620 firmware: it copies that console's own firmware to the USB at
+runtime. Do not upload or redistribute
+`lib/nxp/pcieuartiw620_combo_v1.bin` from the boot partition or
+`/lib/firmware/nxp/pcieuartiw620_combo_v1.bin` from Linux.
 
 The bounded loader checks the files instead of their sizes:
 [`files/ps5-1160-check-boot-files`](files/ps5-1160-check-boot-files) runs
@@ -367,12 +391,15 @@ with a fixed build user, host and timestamp. The kernel step
   applies the patch to v7.3, then checks and applies the local
   [`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch)
   (`c01bdcc…`);
-- sets `X86_PS5_CPUFREQ=m` and `PS5_GPUFREQ=m` (the published config has them
-  built in) and runs `make olddefconfig`. Every other difference from the
-  published config is a toolchain line; the build log shows the diff;
+- sets `X86_PS5_CPUFREQ=m`, `PS5_GPUFREQ=m`, and `MT7921E=m` (the published
+  config does not build all three as modules) and runs `make olddefconfig`.
+  The build log shows the complete config diff;
 - builds `bzImage` and the modules, checks that `ps5_vcn.bin` is built into
   the kernel, and checks `bzImage` against the bounded loader;
 - records the `bzImage` size and SHA-256 in `kernel/kernel-build-info.txt`.
+- verifies that `CONFIG_MT7921E=m`, that the in-tree module exposes the
+  expected PCI aliases and firmware declarations, and that it has the
+  `disable_aspm` parameter used by the image policy.
 
 `amdgpu` keeps `dpm=0 gpu_recovery=0 force_1080p=1`
 ([`config/ps5-amdgpu.conf`](config/ps5-amdgpu.conf)).
@@ -392,7 +419,7 @@ modpost warning, and checks `.return_sites`, the vermagic and the IW620 PCI
 alias. Passing those gates does not replace an exact-image hardware test.
 
 [`scripts/package-linux-ps5-k73.sh`](../../scripts/package-linux-ps5-k73.sh)
-packages the kernel as `linux-ps5 7.3.0-3` for pacman, laid out like the
+packages the kernel as `linux-ps5 7.3.0-4` for pacman, laid out like the
 upstream package (kernel, modules, build headers, UAPI headers) plus AMD's
 licence for `ps5_vcn.bin` in `/usr/share/licenses/linux-ps5`. Its install
 script does nothing to `/boot/efi`; the pacman hook below does that.
@@ -403,10 +430,11 @@ script does nothing to `/boot/efi`; the pacman hook below does that.
 checks the base download, its partition table and both partition hashes,
 then in a chroot without network:
 
-1. replaces `linux-ps5 7.1.7-1` with `7.3.0-3` (`pacman -U`, install script
+1. replaces `linux-ps5 7.1.7-1` with `7.3.0-4` (`pacman -U`, install script
    skipped) and removes the old `/boot/initrd.img-7.1.7`;
-2. installs `mlan.ko` and `moal.ko` in `/usr/lib/modules/7.3.0/updates/ps5-iw620`
-   and runs `depmod`;
+2. verifies the in-tree `mt7921e` module and its packaged firmware, installs
+   its ASPM option, then installs `mlan.ko` and `moal.ko` in
+   `/usr/lib/modules/7.3.0/updates/ps5-iw620` and runs `depmod`;
 3. applies the profile below;
 4. builds `/boot/initrd.img-7.3.0` with
    [`tools/build_1160_initrd.sh`](tools/build_1160_initrd.sh), the
@@ -425,11 +453,12 @@ The build stops unless:
   [`root-changes.expected`](root-changes.expected) exactly;
 - the initramfs holds `amdgpu.ko` for 7.3.0, the eight Cyan Skillfish 2
   firmware files and `ps5-amdgpu.conf`, and none of `mlan`, `moal`,
-  `ps5-cpufreq`, `ps5-gpufreq` or IW620 firmware;
+  `mt7921e`, `ps5-cpufreq`, `ps5-gpufreq` or IW620 firmware;
 - the FAT partition holds exactly `bzImage`, `initrd.img`, `cmdline.txt`,
   `vram.txt` and `kexec.sh`, and they pass the bounded loader check;
 - there are no SSH host keys, no `authorized_keys` and no IW620 firmware
-  anywhere in the image.
+  anywhere in the image, while every MediaTek firmware file declared by
+  `mt7921e` is present.
 
 It writes `output/ps5-cachyos1160-k73.img` (12,582,912,000 bytes),
 `cachyos1160-k73-root-changes.txt` (the profile changes),
@@ -481,11 +510,20 @@ when it exits.
 
 What is different:
 
-- **Kernel.** `linux-ps5 7.3.0-3` replaces 7.1.7. The 7.1.7 package also
+- **Kernel.** Current source uses `linux-ps5 7.3.0-4` in place of 7.1.7.
+  The 7.1.7 package also
   carried a modules-load entry and options for its own Wi-Fi build, the
   `ps5-stage-firmware` helper and `ps5-bt-quiet`; they go with it. The
   profile puts `ps5-bt-quiet` and its unit back unchanged, enabled as before.
-- **Wi-Fi.** `mlan.ko` and `moal.ko` in `updates/ps5-iw620`, and the module
+- **Wi-Fi.** The in-tree `mt7921e` path is selected only by a matching
+  MediaTek PCI modalias. It uses the firmware already packaged in the image
+  and `/etc/modprobe.d/ps5-mt7921e.conf` sets `disable_aspm=1`; no
+  modules-load file or service force-loads it. This path is structurally
+  verified but not hardware-tested on 11.60, and MediaTek Bluetooth remains
+  unknown.
+
+  The IW620 path installs `mlan.ko` and `moal.ko` in
+  `updates/ps5-iw620`, and the module
   options already used with the 7.1.7 Ubuntu Wi-Fi build in
   `/etc/modprobe.d/ps5-iw620.conf`. That file also has `blacklist moal`, so
   udev does not load `moal` through its PCI alias: it would do that before
@@ -495,7 +533,9 @@ What is different:
   `/lib/firmware/nxp/` when it is there and exactly 498,108 bytes, then
   loads `moal` by name, which the blacklist does not stop. Only the Wi-Fi
   loader build writes that file, from the console's own firmware; the image
-  ships no Wi-Fi firmware. The copy in `/lib/firmware/nxp/` stays, so after
+  ships no IW620 firmware. The eight MediaTek firmware files declared by
+  `mt7921e` are packaged separately. The copy in `/lib/firmware/nxp/` stays,
+  so after
   one boot with the Wi-Fi loader, Wi-Fi also comes up with the other bounded
   build. With no firmware in either place, or on a console without the
   IW620 (PCI `1b4b:2b56`), the service does nothing, `moal` is never loaded
@@ -593,8 +633,9 @@ What is different:
   uses for its own images), so an ordinary `pacman -Syu` can run it too. It
   builds a new initramfs and checks it the way the image build does
   (`amdgpu.ko` for the kernel, the eight Cyan Skillfish 2 firmware files and
-  `ps5-amdgpu.conf`, and none of `mlan`, `moal`, the frequency drivers or
-  IW620 firmware), runs the bounded loader check on it and the kernel, and
+  `ps5-amdgpu.conf`, and none of `mlan`, `moal`, `mt7921e`, the
+  frequency drivers or IW620 firmware), runs the bounded loader check on it
+  and the kernel, and
   only then replaces `bzImage` and `initrd.img` on `/boot/efi` and
   `/boot/initrd.img-<version>`. If a check fails, nothing is replaced. The
   pair that was on `/boot/efi` is kept as `bzImage.prev` and
@@ -646,14 +687,17 @@ connect <controller-mac>
 ```
 
 Do not install `disable_ertm=1`, replace `btusb.ko`, or switch this image to
-the kernel-HID workaround before the exact Bazzite-compatible path is tested.
-The boot report records the active BlueZ policy and relevant modules.
+the kernel-HID workaround: those changes would replace the exact IW620
+Bluetooth path already proven with Image 3. MediaTek Bluetooth remains unknown
+and needs separate hardware evidence. The boot report records the active BlueZ
+policy and relevant modules.
 
 ## Not included
 
 - The 11.60 loader.
-- Any Wi-Fi firmware. Each console supplies its own through the Wi-Fi loader
-  build.
+- IW620 firmware. An IW620 console supplies its own through the bounded Wi-Fi
+  loader. The image does include the eight MediaTek firmware files required by
+  `mt7921e`.
 - `regulatory.db` for Wi-Fi.
 - BTF: the published 7.3 config turns `DEBUG_INFO_BTF` off, so `sched_ext`
   schedulers do not work on this kernel. The official image ships none.

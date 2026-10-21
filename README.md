@@ -271,6 +271,26 @@ the USB; neither the loader nor this image contains that firmware. Older 11.60
 loaders refuse these boot-file sizes, and the similarly named
 `linux-1160-dma-e820-wifi` target is not the bounded build.
 
+### Next unified image source
+
+Current `main` builds one `linux-ps5 7.3.0-4` image for both onboard Wi-Fi
+variants. The proven Marvell IW620 path remains exact-ID gated at
+`1b4b:2b56`. Matching MediaTek hardware can use Linux 7.3's in-tree
+`mt7921e` driver; the known PS5 device ID is `14c3:7961`. The image includes
+the firmware declared by that driver and installs `disable_aspm=1`, matching
+the runtime setting in
+[j4lenj's reference](https://github.com/j4lenj/ps5-mt7921-wifi), without
+copying its older Linux 7.1.7 driver source or binaries. Neither Wi-Fi driver
+is force-loaded on the other chipset.
+
+The exact unified 7.3.0-4 image has not been booted. MediaTek Wi-Fi is
+structurally validated by the build and source checks but has not been tested
+on 11.60 hardware; the MediaTek Bluetooth path and hardware remain unknown.
+The Image 3 hardware result does not transfer to this new kernel or image.
+IW620 systems still use the bounded Wi-Fi ELF so the loader can supply the
+console's firmware. MediaTek systems use the bounded non-Wi-Fi ELF because
+their firmware is already packaged in the image.
+
 ### Build it from source
 
 On Linux x86_64:

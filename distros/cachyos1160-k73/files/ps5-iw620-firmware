@@ -4,7 +4,7 @@
 #
 # The firmware 11.60 Wi-Fi loader build writes the console's own firmware to
 # lib/nxp/ on the FAT partition before Linux starts. The image ships no
-# firmware. Without that file, or on a console without the IW620, this does
+# IW620 firmware. Without that file, or on a console without the IW620, this does
 # nothing and Ethernet is unaffected.
 set -eu
 
