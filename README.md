@@ -153,102 +153,81 @@ The [`CachyOS 11.60 image`](.github/workflows/cachyos1160-image.yml) workflow ru
 
 ## CachyOS 7.3 for 11.60
 
-> **Public tester work; every exact CI image needs its own hardware result.**
-> The latest published artifact is still
-> [image 2](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2).
-> Use it only on a retail PS5 running firmware 11.60, with the bounded Wi-Fi
-> ELF from the [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21),
-> and follow the [image-2 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md).
-> Run 21 booted an earlier local image, not image 2. Flashing erases the
-> selected drive. Keep the default-password system on a trusted LAN, never
-> redistribute the console-dumped `pcieuartiw620_combo_v1.bin`, and redact
-> reports before posting them.
+> **Image 3 is a public tester prerelease for retail PS5 firmware 11.60.**
+> The hosted build and structural checks passed, but this exact downloadable
+> image has not yet been booted on a console. A local image and the final live
+> follow-up changes did pass on the 11.60 test console; those results must not
+> be reported as a boot of the hosted artifact.
 
-The Image 3 source candidate packages the new kernel as `linux-ps5 7.3.0-3`.
-It keeps mainline v7.3 and the exact PS5 patch set published by rmux (Armandas Kvietkus),
-[rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1)
-at `36f173f39e5e76c00c4e366a7b909f33bc665ad5`. After that patch set it applies
-the exact `ps5-btusb-quirks-fix.patch` asset published with
-[VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3),
-SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.
-The patch is rebuilt as part of this kernel; a prebuilt `btusb.ko` from another
-image must not be copied into it. Bazzite reports successful DualSense pairing
-on Linux 7.3 and firmware 13.60. Image 3 also matches that working image's
-BlueZ path: the controller stays pairable, Just-Works repair is accepted,
-BlueZ uses UHID, and pairing timeout, controller mode, privacy and auto-enable
-are explicit. This is useful source evidence but is not an 11.60 result for
-this image. Image 3 also updates the out-of-tree Wi-Fi source to
-`ps5-linux/ps5-linux-mwifiex` commit
-`4bce848dd098bf74fbafd0078463da3d9f0d7f80`. That Wi-Fi revision adds the
-current HE capability and transmit-path fixes. NetworkManager is configured
-with `wifi.powersave=2` to avoid the power-saving path implicated in earlier
-wedges. These are source and configuration changes, not proof that the exact
-Image 3 artifact works on 11.60. Joining by name with
-`sudo nmcli --ask device wifi connect <wifi-name>` remains the fallback if
-the KDE network menu cannot join.
+### Start here
 
-Image 3 turns the previously manual CPU and GPU frequency tests into a
-guarded startup policy. `ps5-performance.service` starts only after
-`ps5fan.service` succeeds, verifies `amdgpu dpm=0`, then loads the GPU driver
-before the CPU driver. The expected policy is GPU `simple_ondemand`, CPU
-`schedutil`, and CPU boost off. Do not unload either module: unregistering a
-driver does not restore the clocks. To skip this experimental startup path,
-create an empty `/boot/efi/disable-ps5-performance` file and fully power off
-before the next boot.
+- Download the single archive from the
+  [Image 3 prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-3)
+  and follow the
+  [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md).
+- Use `ps5-linux-loader-1160-dma-e820-bounded-wifi.elf` from the
+  [matching loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
+  Its SHA-256 is
+  `e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f`.
+- Login is `steam` / `steam`. Change the password and keep the system on a
+  trusted network until you do.
+- The first boot opens Plasma so networking can be configured before Steam's
+  first Gaming Mode setup. Use the desktop shortcut to enter Gaming Mode.
+- **Switch to Desktop is not instant.** A clean local pass took about 2.4
+  seconds; an earlier cleanup-heavy pass took about 27 seconds. Wait before
+  clicking again or power-cycling.
+- Linux sleep and hibernate are disabled. Fully shut Linux down between loader
+  attempts.
 
-The fan service requests the fixed maximum servo pattern (`3`) before the
-performance service starts. The tested CFI-1115B identifies its fan as an
-unknown revision, so its dynamic table does not apply. Pattern 3 is the
-safest bring-up request presently available, not a calibrated temperature
-curve, and physical RPM has not been measured.
+Flashing erases the selected drive. Never redistribute the console-dumped
+`pcieuartiw620_combo_v1.bin`, and review `ps5-boot-report.txt` and `dmesg`
+before posting them because they can contain network details.
 
-Image 3 opens Plasma on first boot so Wi-Fi can be configured before Steam's
-one-time Gaming Mode bootstrap, which needs internet access. Plasma resets the
-one-shot token to Gaming Mode when the desktop session ends. Gaming Mode now
-launches Steam with `-steamos -gamepadui`. On the 11.60 test console this made
-Steam use its own legacy session-selector path: **Switch to Desktop** invoked
-`steamos-session-select plasma` and reached Plasma twice without a custom
-SteamOS Manager service. `-steamos3` remains disabled because this is not an
-atomic SteamOS installation. Returning to Gaming Mode stops Plasma's owning
-`graphical-session.target`; the tty launcher then starts Gamescope with no
-overlapping compositor. The exact hosted Image 3 artifact still needs a console test. On image 2,
-recover from a stuck **Switch to Desktop** from SSH or another TTY with:
+### What Image 3 includes
 
-```bash
-sudo steamos-session-select plasma
-sudo systemctl restart getty@tty1.service
-```
+| Area | Included behavior |
+|------|-------------------|
+| Kernel | `linux-ps5 7.3.0-3`, mainline v7.3 plus rmux's pinned PS5 patch set |
+| Wi-Fi | Updated IW620 driver, staged console firmware, stable NetworkManager MAC behavior and Wi-Fi power saving disabled |
+| Bluetooth | The hash-pinned Bazzite Deck v1.0.3 IW620 `btusb` source correction, rebuilt for this kernel, plus the matching BlueZ policy |
+| CPU/GPU clocks | Guarded GPU-then-CPU scaling at startup; GPU `simple_ondemand`, CPU `schedutil`, CPU boost off |
+| Cooling | Fixed maximum fan servo request (`3`) before the performance policy; this is not a calibrated fan curve |
+| Sessions | Plasma on first boot, Steam with `-steamos -gamepadui`, and working legacy session-selector integration |
+| Sleep | Unsupported Linux sleep, suspend and hibernate targets masked |
 
-If HDMI does not switch, try `Ctrl+Alt+F1`; `Ctrl+Alt+F2` opens another TTY
-when a USB keyboard is available. Linux suspend, hibernate, hybrid sleep and
-suspend-then-hibernate are unsupported and masked in Image 3. GameOS Rest
-Mode and wake are only the carrier used to launch the loader; once Linux is
-running, fully power off between test boots rather than trying Linux sleep.
+The local 11.60 follow-up passed Plasma Wi-Fi joining, internal-Bluetooth
+DualSense pairing, and the Gaming Mode → Desktop → Gaming Mode round trip.
+The frequency drivers had already worked when loaded manually. Physical fan
+RPM, a bounded thermal load, video decode, long Bluetooth/Wi-Fi coexistence,
+and a cold boot of the exact hosted image remain open tests. To skip the
+experimental startup clock policy, create an empty
+`/boot/efi/disable-ps5-performance` file and fully power off before the next
+boot. Do not unload the frequency modules as a rollback; unloading does not
+restore the clocks.
 
-Image 3 remains a prerelease until the exact hosted-CI artifact completes at
-least three to five cold boots, DualSense pairing, a 60-minute Bluetooth and
-Wi-Fi coexistence run, and a bounded thermal load. The KDE Wi-Fi join path,
-Bluetooth, automatic session handoff, startup clock policy, fan response and
-video decode must not be treated as proven before those tests. Image 2's
-release hashes and hardware status remain recorded in its release and tester
-guide. The separate
-[Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md)
-stays marked as a source-candidate plan until CI provides the exact artifact
-identity.
+### Published Image 3 identity
 
-The boot files are not the exact sizes the earlier 11.60 loaders require, so
-the image needs the
-[bounded 11.60 loader tester prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
-Use `ps5-linux-loader-1160-dma-e820-bounded-wifi.elf` for the first test; its
-SHA-256 is
-`e9fe6469943e97a635eccd3f674e55876b56cd1bbd69023eee3af4acea3a1b5f`.
-That bounded Wi-Fi artifact booted Run 21 with the earlier local image and
-copies the console's own IW620 firmware to the USB. It does not contain that
-firmware. Never upload or redistribute the resulting
-`pcieuartiw620_combo_v1.bin`. The non-Wi-Fi bounded ELF is included for A/B
-testing but remains unbooted. The similarly named
-`linux-1160-dma-e820-wifi` is not the bounded build. Current loader `main`
-reproduces the prerelease hashes and adds build safeguards. On Linux x86_64:
+| Item | Value |
+|------|-------|
+| Release | [`cachyos1160-k73-image-3`](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-3), public prerelease |
+| Source | `16795eb85830dc32f712e44e9e0da28f7874b317` |
+| CI | [workflow `39521098451`](https://github.com/gzimbric/ps5-linux-image/actions/runs/39521098451), successful |
+| Archive | `ps5-cachyos1160-k73.img.xz`, 1,943,937,164 bytes, SHA-256 `9e224aeb607ba050dd520ce32d50989d27013f7da2889ce7ed1ce247fea71e3c` |
+| Raw image | 12,582,912,000 bytes, SHA-256 `25a0ef68a85dbe6d976b5a97faaa323b64c4efbe1b220003772f25a264eb34a8` |
+| `bzImage` | 11,613,184 bytes, SHA-256 `945a4f2a03c4771313e466dccfb8272e0345cf7d143516a36a0bc75b2b219d0a` |
+| `initrd.img` | 51,899,412 bytes, SHA-256 `912600c22a203a744d4d44fcd4b5caacd86ea8b0c3ef8202ed9c0ff2ba146dd0` |
+| Other boot files | `cmdline.txt` `aec7a85e9ebcf36e4bdaeb89242b898e17817acd40c16db57a3bb9c3117b1da8`; `vram.txt` `bc4642feb06a4cc6d10d5865e321efaad7ab3f3f1d5d025151b79978164310a0`; `kexec.sh` `0f26e09911a8a2bc9912d7c77fee6ac09ccd18a820086cb103be92de081b6c52` |
+| Hardware status | Exact hosted artifact unbooted |
+
+The archive is one file, never numbered parts. Verify `SHA256SUMS` before
+flashing. The bounded Wi-Fi loader copies the console's own IW620 firmware to
+the USB; neither the loader nor this image contains that firmware. Older 11.60
+loaders refuse these boot-file sizes, and the similarly named
+`linux-1160-dma-e820-wifi` target is not the bounded build.
+
+### Build it from source
+
+On Linux x86_64:
 
 ```bash
 ./scripts/build-linux-ps5-k73.sh
@@ -258,24 +237,18 @@ sudo ./scripts/verify-cachyos1160-k73-image.sh --image output/ps5-cachyos1160-k7
 ```
 
 The [profile README](distros/cachyos1160-k73/README.md) lists the pins, checks,
-changes, and remaining test gaps. The
+changes, exact release identity, and remaining test gaps. The
 [`CachyOS 7.3 11.60 image`](.github/workflows/cachyos1160-k73-image.yml)
-workflow runs these steps on GitHub-hosted runners and attaches exactly one
-`ps5-cachyos1160-k73.img.xz` to a draft release. It never publishes split
-image parts: if the compressed image reaches the 2 GiB per-file limit, the
-workflow stops without creating a release. The kernel package and IW620
-modules are cached under a fingerprint of every tracked kernel-build input.
-A `main` push that changes one of those inputs rebuilds and validates the
-bundle to prime the default-branch cache; a tag or manual image run accepts
-only that exact cache key and builds the kernel again on a miss. The cached
-handoff has its own SHA-256 manifest, which is checked after restore and again
-after transfer to the image job. There are no partial-key fallbacks. All
-compilation, image assembly, compression, and release uploading happens on
-GitHub's runners. A Mac is not part of the build or artifact path and does
-not relay the image. The full image workflow runs when a tag matching
-`cachyos1160-k73-image-*` is pushed or when it is started manually. A
-successful workflow validates the build and image structure; it does not
-establish a hardware result for that exact artifact.
+uses GitHub-hosted runners. A manual workflow dispatch builds the full image,
+verifies it, compresses it to one `.img.xz`, and creates or safely refreshes
+the draft for the requested tag. Publishing that draft creates the tag; the
+tag push does not start another build. A published release is never
+overwritten. A `main` push that changes a kernel input only rebuilds and
+validates the exact cache bundle for the next manual image run. The workflow
+stops before the release step if the archive reaches GitHub's 2 GiB per-file
+limit. All compilation, assembly, compression and uploading stays on the
+hosted runners; a Mac does not build or relay the artifact. Passing CI proves
+the software checks, not a hardware boot.
 
 ## Prerequisites
 

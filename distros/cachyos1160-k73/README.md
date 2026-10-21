@@ -8,18 +8,20 @@ automatic `tty1` session handoff, and safe pacman boot-file updates.
 
 A local pre-release image from this profile booted on hardware in Run 21.
 Display, Ethernet, loader-supplied IW620 Wi-Fi and the frequency drivers all
-worked in that run. Run 21 did not boot either tagged CI image. Image 2 is
-the latest published artifact and remains unbooted. Image 3 is a new source
-candidate; its exact hosted-CI artifact needs a fresh hardware run before any
-of its startup integrations can be called proven.
+worked in that run. Later live tests on the same system passed Plasma Wi-Fi
+joining, internal-Bluetooth DualSense pairing, and the complete Gaming Mode →
+Desktop → Gaming Mode handoff. The public Image 3 prerelease contains those
+changes, but its exact hosted image has not been booted. Keep the local and
+hosted results separate when reporting tests.
 
-> **Tester warning:** The latest published artifact is
-> [image 2](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-2),
-> but the exact CI image has not booted on a console. This profile is only for
-> retail PS5 firmware 11.60 and requires the
+> **Tester warning:** The current download is the public
+> [Image 3 prerelease](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-3).
+> Its hosted build and structural checks passed, but that exact raw image has
+> not booted on a console. This profile is only for retail PS5 firmware 11.60
+> and requires the
 > [bounded 11.60 loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
-> For image 2, use the bounded Wi-Fi ELF and follow the
-> [image-2 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-2-tester-guide.md).
+> Use the bounded Wi-Fi ELF and follow the
+> [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md).
 > Flashing overwrites the entire target drive. Keep the default-password system
 > on a trusted LAN, change the password immediately, never redistribute the
 > console-dumped
@@ -29,7 +31,42 @@ The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
 built on 2026-08-29 from upstream commit `52db0a4`
 (sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
 
-## Published image 2 reference
+## Current Image 3 prerelease
+
+| Item | Value |
+|------|-------|
+| Release | [`cachyos1160-k73-image-3`](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-3), public prerelease |
+| Source commit | `16795eb85830dc32f712e44e9e0da28f7874b317` |
+| Kernel package | `linux-ps5 7.3.0-3` |
+| CI | [workflow `39521098451`](https://github.com/gzimbric/ps5-linux-image/actions/runs/39521098451): success |
+| Release archive | one `ps5-cachyos1160-k73.img.xz`; 1,943,937,164 bytes; never split |
+| Compressed SHA-256 | `9e224aeb607ba050dd520ce32d50989d27013f7da2889ce7ed1ce247fea71e3c` |
+| Raw image | 12,582,912,000 bytes; SHA-256 `25a0ef68a85dbe6d976b5a97faaa323b64c4efbe1b220003772f25a264eb34a8` |
+| `bzImage` | 11,613,184 bytes; SHA-256 `945a4f2a03c4771313e466dccfb8272e0345cf7d143516a36a0bc75b2b219d0a` |
+| `initrd.img` | 51,899,412 bytes; SHA-256 `912600c22a203a744d4d44fcd4b5caacd86ea8b0c3ef8202ed9c0ff2ba146dd0` |
+| `cmdline.txt` | 118 bytes; SHA-256 `aec7a85e9ebcf36e4bdaeb89242b898e17817acd40c16db57a3bb9c3117b1da8` |
+| `vram.txt` | 11 bytes; SHA-256 `bc4642feb06a4cc6d10d5865e321efaad7ab3f3f1d5d025151b79978164310a0` |
+| `kexec.sh` | 136 bytes; SHA-256 `0f26e09911a8a2bc9912d7c77fee6ac09ccd18a820086cb103be92de081b6c52` |
+| Hardware status | Exact hosted artifact unbooted |
+
+The downloaded archive, GitHub digest, checksum manifest and XZ round trip
+were checked. Only a boot of raw image SHA-256 `25a0ef68…` closes the hosted
+artifact's hardware gate. The local Run 21 image and its later live changes
+are supporting evidence, not a substitute for that test.
+
+For comparison, the local hardware-test image was built from
+`f7d6fbd9d630cddaceb83f3b861869d4453af8ca`; its 12,582,912,000-byte raw
+image has SHA-256
+`5a904e02f6a2908be91054b7b73ebf6f891fece0edc1a88f2f9d60264d7556d4`.
+The final live-tested session files were the 1,866-byte
+`gamescope-session-ps5` (`d68c1f3a9014dd2db00681b5434f6e951bc6d4ebdebc48ec77fc154dbf2fc687`)
+and the 3,736-byte `steamos-session-select`
+(`1d099eeacc19bbf575e5a636fc81087a46f72af64390172e437372b493bde1c1`).
+The public image contains those session-file identities and the same boot-file
+identities listed above, but its different raw-image hash still requires a
+separate cold-boot result.
+
+## Previous Image 2 reference
 
 | Item | Value |
 |------|-------|
@@ -44,10 +81,10 @@ built on 2026-08-29 from upstream commit `52db0a4`
 | Hardware status | unbooted |
 
 The downloaded prerelease assets, GitHub digests, `SHA256SUMS`, XZ stream and
-raw image hash were checked after the run. The release workflow aborts before
-creating a draft if the compressed image is 2 GiB or larger. A completed
-build or verifier pass, and publication of a prerelease, provide only software
-and release validation; none of them is a console boot.
+raw image hash were checked after the run. The current release workflow stops
+before creating or refreshing a draft if the compressed image is 2 GiB or
+larger. A completed build or verifier pass, and publication of a prerelease,
+provide only software and release validation; none of them is a console boot.
 
 Compared with the local image that booted in Run 21, image 2:
 
@@ -75,7 +112,7 @@ Try `Ctrl+Alt+F1` if HDMI does not switch back to the first TTY. This is the
 same handoff that worked manually in Run 21. Do not use Linux suspend or Rest
 Mode as a recovery step; fully power off before another loader run.
 
-## Image 3 source candidate
+## What Image 3 changes
 
 Image 3 opens Plasma on the first boot so Wi-Fi can be configured before
 Steam's one-time bootstrap, then uses Gaming Mode as the normal default. The
@@ -86,8 +123,10 @@ that were manual in Run 21:
   `4bce848dd098bf74fbafd0078463da3d9f0d7f80`, including its current HE
   capability and transmit-path fixes, while retaining this profile's Linux
   7.3 compatibility patch. The driver keeps `auto_fw_reload=0`, and
-  NetworkManager sets `wifi.powersave=2`. The exact Image 3 modules still need
-  an 11.60 console test, and
+  NetworkManager disables scan MAC randomization, keeps the permanent address
+  and sets `wifi.powersave=2`. That configuration passed a WPA3 join, DHCP and
+  an HTTPS request from Plasma on the local 11.60 system. The exact hosted
+  Image 3 modules still need their own console test, and
   `sudo nmcli --ask device wifi connect <wifi-name>` remains the fallback if
   the KDE network menu does not join.
 - **Bluetooth:** replaces the image-2 follow-up with the exact
@@ -97,9 +136,10 @@ that were manual in Run 21:
   `btusb.ko`. The image also selects the working Bazzite BlueZ path:
   `AlwaysPairable=true`, `JustWorksRepairing=always`, `UserspaceHID=true`,
   and explicit pairing timeout, controller mode, privacy and auto-enable
-  values. Their Linux 7.3 and firmware 13.60 result supports this combination,
-  but the exact image still needs 11.60 DualSense pairing and coexistence
-  testing.
+  values. A DualSense paired, bonded, trusted and connected through the
+  internal adapter on the local 11.60 system, with no USB controller present.
+  The exact hosted image still needs its own pairing result and a long
+  Wi-Fi/Bluetooth coexistence test.
 - **Fan:** requests fixed maximum servo pattern `3` before the performance
   policy starts. The tested CFI-1115B reports an unknown fan revision, so the
   dynamic fan table does not update on that console. This is a conservative
@@ -117,7 +157,9 @@ that were manual in Run 21:
   consecutive attempts reached Plasma. No custom SteamOS Manager service is
   installed. Return to Gaming Mode stops `graphical-session.target`, the
   systemd owner of KWin and plasmashell on this image, before the tty launcher
-  resumes into Gamescope.
+  resumes into Gamescope. **Switch to Desktop can take a few seconds.** The
+  clean local pass took about 2.4 seconds, while an earlier cleanup-heavy pass
+  took about 27 seconds. Wait before clicking it again or power-cycling.
 - **Sleep:** Linux sleep, suspend, hibernate, hybrid sleep and
   suspend-then-hibernate targets are masked. GameOS Rest Mode and wake remain
   only the carrier used to launch the loader. Once Linux is running, shut down
@@ -130,8 +172,7 @@ automatic session handoff, startup frequency policy, physical fan response,
 VCN video decode, storage integrity and broader hardware coverage remain test
 gaps until recorded otherwise. The
 [Image 3 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-3-tester-guide.md)
-is intentionally a source-candidate plan until the hosted run supplies exact
-release hashes.
+contains the exact release hashes, boot steps and result checklist.
 
 ## Patch provenance and credit
 
@@ -169,8 +210,9 @@ built from Bazzite revision
 It sets `AlwaysPairable=true`, `JustWorksRepairing=always` and
 `UserspaceHID=true`; Image 3 carries those active values and makes the other
 effective BlueZ defaults explicit. That is useful source-level evidence, but
-it is not an 11.60 hardware result for Image 3. Image 2 remains the published,
-unbooted artifact and contains its earlier non-identical follow-up.
+it is not an 11.60 result for the exact hosted artifact. The current Image 3
+prerelease contains this correction; Image 2 contains the earlier,
+non-identical follow-up.
 
 The out-of-tree Wi-Fi modules are a separate driver build. Image 3 pins
 `ps5-linux/ps5-linux-mwifiex` at
@@ -228,10 +270,14 @@ sudo ./scripts/verify-cachyos1160-k73-image.sh --image output/ps5-cachyos1160-k7
 The [`CachyOS 7.3 11.60 image`](../../.github/workflows/cachyos1160-k73-image.yml)
 workflow runs the same steps on GitHub-hosted runners, zeroes the free
 blocks of the root filesystem, runs the verifier again, compresses the image
-to one `.img.xz` and attaches it to a draft release. It never creates
-numbered parts. If the compressed file is 2 GiB or larger, the workflow fails
-before the release step. Compilation, assembly, compression and uploading all
-stay on the hosted runners; a Mac is not used to build or relay the artifact.
+to one `.img.xz` and creates or safely refreshes the draft for the requested
+tag. It never creates numbered parts. Full image builds start only by manual
+workflow dispatch. Publishing the draft creates the tag and does not start a
+second build; an already published release is never overwritten. A `main`
+push that changes a kernel input only primes the exact kernel-bundle cache.
+If the compressed file is 2 GiB or larger, the workflow fails before the
+release step. Compilation, assembly, compression and uploading all stay on
+the hosted runners; a Mac is not used to build or relay the artifact.
 
 ### Kernel
 
@@ -347,9 +393,8 @@ the loader, but `kexec.sh` is not expected to work with this kernel.
 ## If the display does not come up
 
 The local Run 21 image brought up the display with the VCN block enabled, but
-video decode was not tested and neither image 2 nor any forthcoming exact
-Image 3 artifact has a hardware result. If VCN fails to start, amdgpu can fail
-to probe.
+video decode was not tested and the exact published Image 3 artifact does not
+yet have a hardware result. If VCN fails to start, amdgpu can fail to probe.
 Ethernet and SSH do not depend on it, so they should still come up: SSH in and
 save
 `sudo dmesg` and the boot report. To boot without VCN, find
@@ -410,7 +455,8 @@ What is different:
   same controller, privacy and auto-enable behavior used by the working
   Bazzite image. `/etc/bluetooth/input.conf` explicitly keeps
   `UserspaceHID=true`; `uhid` and `hid-playstation` are built for this kernel.
-  The resulting CI image still needs DualSense pairing on firmware 11.60.
+  This path passed with a DualSense on the local 11.60 system. The exact
+  hosted image still needs its own pairing result.
 - **Fan.** `ps5fan.service` is enabled and runs at boot. It asks the ICC for
   maximum fan servo pattern `3` as a fixed bring-up setting, before the
   performance service. The tested CFI-1115B reports an unknown fan revision
@@ -439,8 +485,11 @@ What is different:
   install a partial SteamOS Manager replacement. On return to Gaming Mode the
   selector stops `graphical-session.target`, the systemd owner of KWin and
   plasmashell on this image, then the existing tty launcher resumes into
-  Gamescope without a later process kill that could hit the new session. The
-  exact hosted Image 3 artifact still needs the same round-trip test.
+  Gamescope without a later process kill that could hit the new session.
+  **Switch to Desktop may take a few seconds:** one clean pass took about 2.4
+  seconds and an earlier cleanup-heavy pass took about 27 seconds. Wait before
+  clicking it again. The exact hosted Image 3 artifact still needs the same
+  round-trip test.
 - **Sleep.** `sleep.target`, `suspend.target`, `hibernate.target`,
   `hybrid-sleep.target` and `suspend-then-hibernate.target` are masked because
   Linux suspend is unsupported. GameOS Rest Mode and wake remain the loader's
