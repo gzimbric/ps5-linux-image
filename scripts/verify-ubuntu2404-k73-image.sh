@@ -155,6 +155,7 @@ root_free=$(df -B1 --output=avail "$R" | tail -n1 | tr -d ' ')
 ok "root filesystem: $(df -h --output=used "$R" | tail -n1 | tr -d ' ') used, $(df -h --output=avail "$R" | tail -n1 | tr -d ' ') free"
 # The image's own tools, read-only, without network.
 mount -t tmpfs tmpfs "$R/tmp"; MOUNTS+=("$R/tmp")
+mount -t tmpfs tmpfs "$R/var/tmp"; MOUNTS+=("$R/var/tmp")
 mount -t tmpfs tmpfs "$R/run"; MOUNTS+=("$R/run")
 mount -t proc proc "$R/proc"; MOUNTS+=("$R/proc")
 mount --bind /dev "$R/dev"; MOUNTS+=("$R/dev")
