@@ -1,0 +1,21 @@
+#!/bin/sh
+# prerm for linux-ps5 __KVER__ (PS5 Ubuntu 24.04 7.3 image).
+# scripts/package-linux-ps5-k73-deb.sh fills in the version.
+#
+# Removing the running kernel takes its modules away while the boot
+# partition still starts it, so the next boot has no display, network or USB
+# storage drivers past the initramfs. Refuse unless asked explicitly.
+set -e
+
+KVER=__KVER__
+
+case "$1" in
+    remove)
+        if [ "$(uname -r)" = "$KVER" ] && [ "${PS5_ALLOW_KERNEL_REMOVAL:-}" != 1 ]; then
+            echo "linux-ps5: refusing to remove the running kernel $KVER." >&2
+            echo "linux-ps5: run with PS5_ALLOW_KERNEL_REMOVAL=1 to remove it anyway." >&2
+            exit 1
+        fi
+        ;;
+esac
+exit 0

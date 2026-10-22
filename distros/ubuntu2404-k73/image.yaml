@@ -1,0 +1,177 @@
+# Ubuntu 24.04 LTS on Linux 7.3.0 for regular PS5 consoles (firmware 11.xx
+# and 13.xx). Built by scripts/build-ubuntu2404-k73-image.sh through
+# docker/image-builder/entrypoint.sh with DISTRO=ubuntu2404-k73. The package
+# set and apt setup are the ones distros/ubuntu2404 uses; everything
+# PS5-specific happens in setup-rootfs.sh (the post-files action below).
+image:
+  name: ps5-ubuntu2404-k73
+  distribution: ubuntu
+  release: noble
+  description: Ubuntu Noble desktop on Linux 7.3.0 for the PS5
+  architecture: x86_64
+
+source:
+  downloader: debootstrap
+  url: http://archive.ubuntu.com/ubuntu
+  variant: minbase
+  keyserver: keyserver.ubuntu.com
+  keys:
+  - 0x790BC7277767219C42C86F933B4FE6ACC0B21F32
+  - 0xf6ecb3762474eda9d21b7022871920d1991bc93c
+
+packages:
+  manager: apt
+  update: true
+  cleanup: true
+
+  repositories:
+  - name: sources.list
+    url: |-
+      deb http://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
+      deb http://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
+      deb http://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe multiverse
+    architectures:
+    - amd64
+
+  sets:
+  - packages:
+    - ubuntu-desktop
+    - gnome-software
+    - firefox
+    - openssh-server
+    - build-essential
+    - network-manager
+    - linux-firmware
+    - initramfs-tools
+    - kmod
+    - dialog
+    - sudo
+    - nano
+    - cloud-guest-utils
+    - kexec-tools
+    - fonts-ubuntu
+    - fonts-liberation
+    - fonts-dejavu
+    - fontconfig
+    - systemd-zram-generator
+    - git
+    - flex
+    - gawk
+    - bison
+    - dwarves
+    - libelf-dev
+    - libssl-dev
+    - libncurses-dev
+    - cpio
+    - zstd
+    - lm-sensors
+    - iperf3
+    - ethtool
+    - pciutils
+    - usbutils
+    - libdrm-tests
+    # Wi-Fi and Bluetooth tools, and fsck for the FAT boot partition.
+    - bluez
+    - iw
+    - rfkill
+    - wireless-regdb
+    - dosfstools
+    action: install
+
+files:
+- path: /etc/machine-id
+  generator: dump
+
+- path: /etc/NetworkManager/conf.d/dns.conf
+  generator: copy
+  source: /tmp/build-staging/nm-dns.conf
+
+- path: /etc/fstab
+  generator: copy
+  source: /tmp/build-staging/fstab
+
+- path: /usr/local/sbin/grow-rootfs
+  generator: copy
+  source: /tmp/build-staging/grow-rootfs
+  mode: "0755"
+
+- path: /etc/systemd/system/grow-rootfs.service
+  generator: copy
+  source: /tmp/build-staging/grow-rootfs.service
+
+- path: /opt/debs/
+  generator: copy
+  source: /tmp/build-staging/debs
+
+- path: /opt/ps5-bootstrap/
+  generator: copy
+  source: /repo/distros/ubuntu2404-k73/files
+
+- path: /opt/ps5-cmdline.txt
+  generator: copy
+  source: /repo/distros/ubuntu2404-k73/cmdline.txt
+
+- path: /opt/ps5-iw620/
+  generator: copy
+  source: /ps5-iw620
+
+- path: /opt/ps5-setup-rootfs.sh
+  generator: copy
+  source: /repo/distros/ubuntu2404-k73/setup-rootfs.sh
+  mode: "0755"
+
+actions:
+- trigger: post-unpack
+  action: |-
+    #!/bin/bash
+    set -eux
+    rm -f /var/lib/apt/lists/*InRelease /var/lib/apt/lists/*Release /var/lib/apt/lists/*Packages* || true
+    printf 'Acquire::Retries "10";\n' > /etc/apt/apt.conf.d/80retry
+
+    # The image must never get a generic or HWE kernel beside linux-ps5.
+    cat > /etc/apt/preferences.d/99-ps5-kernel <<'EOF'
+    Package: linux-generic* linux-image-generic* linux-headers-generic* linux-image-*-generic linux-modules-*-generic linux-modules-extra-*-generic linux-headers-*-generic
+    Pin: version *
+    Pin-Priority: -1
+    EOF
+
+    apt-get update
+    apt-get install -y gnupg dirmngr curl
+
+    mkdir -p /root/.gnupg /etc/apt/keyrings
+    chmod 700 /root/.gnupg
+    ppa_key=$(mktemp)
+    curl -fsSL \
+        "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0AB215679C571D1C8325275B9BDB3D89CE49EC21" \
+        -o "$ppa_key"
+    mapfile -t ppa_fingerprints < <(
+        gpg --batch --show-keys --with-colons "$ppa_key" \
+            | awk -F: '$1 == "pub" { primary = 1; next }
+                primary && $1 == "fpr" { print $10; primary = 0 }'
+    )
+    test "${#ppa_fingerprints[@]}" -eq 1
+    test "${ppa_fingerprints[0]}" = \
+        0AB215679C571D1C8325275B9BDB3D89CE49EC21
+    gpg --batch --no-default-keyring \
+        --keyring gnupg-ring:/etc/apt/keyrings/mozillateam.gpg \
+        --import "$ppa_key"
+    rm -f "$ppa_key"
+    chmod 644 /etc/apt/keyrings/mozillateam.gpg
+
+    echo "deb [signed-by=/etc/apt/keyrings/mozillateam.gpg] http://ppa.launchpad.net/mozillateam/ppa/ubuntu noble main" \
+        > /etc/apt/sources.list.d/mozilla-ppa.list
+    cat > /etc/apt/preferences.d/mozilla-ppa <<'EOF'
+    Package: firefox*
+    Pin: release o=LP-PPA-mozillateam
+    Pin-Priority: 1001
+    EOF
+
+- trigger: post-files
+  action: |-
+    #!/bin/bash
+    set -eu
+    /opt/ps5-setup-rootfs.sh
+    rm -f /opt/ps5-setup-rootfs.sh
+
+mappings:
+  architecture_map: debian

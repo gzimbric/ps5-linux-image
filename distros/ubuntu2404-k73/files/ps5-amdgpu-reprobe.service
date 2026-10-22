@@ -1,0 +1,14 @@
+[Unit]
+Description=Re-detect PS5 DRM connectors after early amdgpu initialization
+After=systemd-udevd.service
+Before=getty@tty1.service display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ps5-amdgpu-reprobe
+TimeoutStartSec=45
+TimeoutStopSec=5
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+#!/bin/sh
+# initramfs-tools hook: the amdgpu options and the Cyan Skillfish 2 GPU
+# firmware the PS5 display needs before the root filesystem is mounted, and
+# the MediaTek Bluetooth udev rule.
+set -eu
+case "${1:-}" in
+    prereqs) exit 0 ;;
+esac
+dest="$DESTDIR/usr/lib/firmware/amdgpu"
+mkdir -p "$dest" "$DESTDIR/etc/modprobe.d"
+cp /etc/modprobe.d/ps5-amdgpu.conf "$DESTDIR/etc/modprobe.d/"
+for name in ce me mec mec2 pfp rlc sdma sdma1; do
+    file="cyan_skillfish2_${name}.bin"
+    test -f "/usr/lib/firmware/amdgpu/$file"
+    cp -L "/usr/lib/firmware/amdgpu/$file" "$dest/$file"
+done
+# udev in the initramfs turns off the phantom interfaces 3 and 4 of the
+# MediaTek controller (0e8d:3603) before the root filesystem's udev loads
+# btusb, which would otherwise bind them while their own events are still
+# queued. Ubuntu's udev hook copies custom rules from /etc/udev/rules.d to the
+# same place; this keeps the rule there if that ever changes.
+mkdir -p "$DESTDIR/usr/lib/udev/rules.d"
+cp /etc/udev/rules.d/99-ps5-bt-phantom.rules "$DESTDIR/usr/lib/udev/rules.d/"

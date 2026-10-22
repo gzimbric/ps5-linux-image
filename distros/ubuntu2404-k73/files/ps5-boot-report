@@ -1,0 +1,386 @@
+#!/bin/sh
+set -eu
+
+umask 077
+summary=
+bounded=
+temporary=
+# Called by the EXIT trap.
+# shellcheck disable=SC2329
+cleanup() {
+    [ -z "$temporary" ] || rm -f -- "$temporary" || true
+    [ -z "$summary" ] || rm -f -- "$summary" || true
+    [ -z "$bounded" ] || rm -f -- "$bounded" || true
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+summary=$(mktemp /run/ps5-boot-summary.XXXXXX)
+bounded=$(mktemp /run/ps5-boot-report.XXXXXX)
+
+# The report is copied to the FAT partition so testers can share it. It must
+# not carry their Wi-Fi network name or access point address (a BSSID can be
+# looked up to find where it is). The names this console knows, from its
+# saved NetworkManager Wi-Fi profiles and the last scan, are replaced with
+# <wifi-name>, wpa_supplicant's lines are dropped, and MAC addresses are
+# masked, including the partly masked ones the Wi-Fi driver prints. IP
+# addresses stay in.
+PS5_REPORT_WIFI_NAMES=$(
+    for profile in /etc/NetworkManager/system-connections/* \
+        /run/NetworkManager/system-connections/*; do
+        [ -f "$profile" ] || continue
+        grep -q '^\[wifi\]' "$profile" 2>/dev/null || continue
+        sed -n 's/^id=//p; s/^ssid=//p' "$profile" 2>/dev/null
+    done
+    timeout 5 nmcli --escape no --get-values SSID device wifi list --rescan no 2>/dev/null
+) || true
+export PS5_REPORT_WIFI_NAMES
+
+scrub() {
+    awk '
+        BEGIN { count = split(ENVIRON["PS5_REPORT_WIFI_NAMES"], names, "\n") }
+        /wpa_supplicant/ { next }
+        {
+            line = $0
+            for (i = 1; i <= count; i++) {
+                # nmcli shows a hidden network as an empty name or --.
+                if (names[i] == "" || names[i] == "--")
+                    continue
+                out = ""
+                while ((p = index(line, names[i])) > 0) {
+                    out = out substr(line, 1, p - 1) "\001"
+                    line = substr(line, p + length(names[i]))
+                }
+                line = out line
+            }
+            gsub(/\001/, "<wifi-name>", line)
+            print line
+        }' |
+        sed -E 's/\b[0-9A-Fa-fXx]{2}(:[0-9A-Fa-fXx]{2}){5}\b/xx:xx:xx:xx:xx:xx/g'
+}
+
+{
+    echo "PS5 Ubuntu 24.04 7.3 boot report"
+    printf 'generated='; date -u +%Y-%m-%dT%H:%M:%SZ
+    printf 'boot_id='; cat /proc/sys/kernel/random/boot_id
+    printf 'uname='; uname -a
+    printf 'cmdline='; cat /proc/cmdline
+    printf 'uptime='; cat /proc/uptime
+
+    echo
+    echo "[mounts]"
+    findmnt -rno SOURCE,TARGET,FSTYPE,OPTIONS / 2>&1 || true
+    findmnt -rno SOURCE,TARGET,FSTYPE,OPTIONS /boot/efi 2>&1 || true
+    lsblk -o NAME,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINTS 2>&1 || true
+
+    echo
+    echo "[boot-files]"
+    kver=$(uname -r)
+    # shellcheck disable=SC2016 # dpkg-query expands these
+    printf 'linux-ps5='; dpkg-query -W -f='${Version} ${db:Status-Abbrev}\n' linux-ps5 2>&1 || true
+    for boot_file in /boot/efi/bzImage /boot/efi/initrd.img /boot/efi/cmdline.txt \
+        /boot/efi/vram.txt /boot/efi/bzImage.prev /boot/efi/initrd.img.prev \
+        "/boot/vmlinuz-$kver" "/boot/initrd.img-$kver"; do
+        if [ -f "$boot_file" ]; then
+            printf '%s size=%s sha256=%s\n' "$boot_file" \
+                "$(stat -c %s "$boot_file" 2>/dev/null || echo unknown)" \
+                "$(sha256sum "$boot_file" 2>/dev/null | cut -d ' ' -f 1)"
+        else
+            printf '%s missing\n' "$boot_file"
+        fi
+    done
+
+    echo
+    echo "[network]"
+    ip -brief link 2>&1 || true
+    ip -brief address 2>&1 || true
+    ip route 2>&1 || true
+    nmcli --terse --fields DEVICE,TYPE,STATE device status 2>&1 || true
+
+    echo
+    echo "[wifi]"
+    for firmware in /boot/efi/lib/nxp/pcieuartiw620_combo_v1.bin \
+        /lib/firmware/nxp/pcieuartiw620_combo_v1.bin; do
+        if [ -f "$firmware" ]; then
+            # The loader dump size follows the console firmware.
+            size=$(stat -c %s "$firmware")
+            case $size in
+                498108) dump="11.xx loader size" ;;
+                500296) dump="13.xx loader size" ;;
+                492304|493000|493532|494536|497636) dump="older loader size" ;;
+                *) dump="unknown size, not used" ;;
+            esac
+            printf '%s %s bytes (%s) %s\n' "$firmware" "$size" "$dump" \
+                "$(sha256sum "$firmware" | cut -d' ' -f1)"
+        else
+            printf '%s missing\n' "$firmware"
+        fi
+    done
+    journalctl -b --no-pager -o cat -u ps5-iw620-firmware.service 2>&1 | tail -n 10 || true
+    for module in cfg80211 mt76 mt76_connac_lib mt792x_lib mt7921_common mt7921e mlan moal; do
+        if [ -d "/sys/module/$module" ]; then
+            printf 'module %s loaded\n' "$module"
+        else
+            printf 'module %s not loaded\n' "$module"
+        fi
+    done
+    printf 'modinfo -n moal: '; modinfo -n moal 2>&1 || true
+    printf 'modinfo -n mt7921e: '; modinfo -n mt7921e 2>&1 || true
+    printf 'mt7921e disable_aspm='; \
+        cat /sys/module/mt7921e/parameters/disable_aspm 2>/dev/null || echo not-loaded
+    printf 'tainted='; cat /proc/sys/kernel/tainted 2>&1 || true
+    for dev in /sys/bus/pci/devices/*; do
+        vendor=$(cat "$dev/vendor" 2>/dev/null || true)
+        device=$(cat "$dev/device" 2>/dev/null || true)
+        case "$vendor:$device" in
+            0x1b4b:0x2b56|0x14c3:0x7961) ;;
+            *) continue ;;
+        esac
+        driver=none
+        [ ! -e "$dev/driver" ] || driver=$(basename "$(readlink "$dev/driver")")
+        net=
+        for iface in "$dev"/net/*; do
+            [ ! -e "$iface" ] || net="$net ${iface##*/}"
+        done
+        printf '%s pci=%s:%s driver=%s net=%s\n' "${dev##*/}" \
+            "${vendor#0x}" "${device#0x}" "$driver" "${net# }"
+    done
+    # Count only; network names stay out of the report. --rescan no uses the
+    # last scan instead of waiting for a new one.
+    printf 'wifi networks in scan: '
+    timeout 5 nmcli --terse --fields SSID device wifi list --rescan no 2>/dev/null | wc -l
+    dmesg --color=never 2>&1 | grep -E 'wlan:|WLAN|PCIEIW620|mt7921|mt76|FW download|Request firmware|request_firmware' \
+        | tail -n 40 || true
+
+    echo
+    echo "[bluetooth]"
+    lsusb 2>&1 || true
+    lsusb -d 1286:2059 2>&1 || true
+    lsusb -d 0e8d:3603 2>&1 || true
+    lsusb -t 2>&1 || true
+    btusb=$(modinfo -n btusb 2>/dev/null || true)
+    printf 'btusb=%s\n' "${btusb:-unavailable}"
+    if [ -n "$btusb" ] && [ -f "$btusb" ]; then
+        sha256sum "$btusb" 2>&1 || true
+    fi
+    printf 'btusb vermagic='; modinfo -F vermagic btusb 2>&1 || true
+    printf 'btusb srcversion='; modinfo -F srcversion btusb 2>&1 || true
+    for param in ps5_tx_ep enable_autosuspend; do
+        printf 'btusb %s=' "$param"
+        cat "/sys/module/btusb/parameters/$param" 2>/dev/null || echo not-loaded
+    done
+    lsmod 2>&1 | grep -E '^(btusb|btintel|btbcm|btrtl|btmtk|bluetooth|uhid|hidp|hid_playstation)' || true
+    echo 'BlueZ main policy:'
+    grep -E '^(AlwaysPairable|PairableTimeout|ControllerMode|Privacy|JustWorksRepairing|AutoEnable)=' \
+        /etc/bluetooth/main.conf 2>&1 || true
+    echo 'BlueZ HID policy:'
+    grep -E '^UserspaceHID=' /etc/bluetooth/input.conf 2>&1 || true
+    bluetoothctl list 2>&1 || true
+    bluetoothctl show 2>&1 || true
+    bluetoothctl devices 2>&1 || true
+    bluetoothctl devices Paired 2>&1 || true
+    bluetoothctl devices Connected 2>&1 || true
+    grep -Ei -A8 'DualSense|Wireless Controller' /proc/bus/input/devices 2>&1 || true
+    if command -v btmgmt >/dev/null 2>&1; then
+        btmgmt info 2>&1 || true
+    fi
+    rfkill list bluetooth 2>&1 || true
+    for controller in /sys/class/bluetooth/hci*; do
+        [ -e "$controller" ] || continue
+        printf '%s address=%s path=%s\n' "${controller##*/}" \
+            "$(cat "$controller/address" 2>/dev/null || echo unavailable)" \
+            "$(readlink -f "$controller/device" 2>/dev/null || echo unavailable)"
+    done
+    # IW620 (1286:2059) and MediaTek (0e8d:3603) Bluetooth. On the MediaTek
+    # one, 99-ps5-bt-phantom.rules deauthorizes interfaces 3 and 4.
+    for device in /sys/bus/usb/devices/*; do
+        case "$(cat "$device/idVendor" 2>/dev/null):$(cat "$device/idProduct" 2>/dev/null)" in
+            1286:2059|0e8d:3603) ;;
+            *) continue ;;
+        esac
+        printf '%s %s:%s power/control=%s\n' "${device##*/}" \
+            "$(cat "$device/idVendor")" "$(cat "$device/idProduct")" \
+            "$(cat "$device/power/control" 2>/dev/null || echo unavailable)"
+        for intf in "$device"/"${device##*/}":*; do
+            [ -e "$intf/bInterfaceNumber" ] || continue
+            driver=none
+            [ ! -e "$intf/driver" ] || driver=$(basename "$(readlink "$intf/driver")")
+            printf '  %s interface=%s authorized=%s driver=%s\n' "${intf##*/}" \
+                "$(cat "$intf/bInterfaceNumber" 2>/dev/null)" \
+                "$(cat "$intf/authorized" 2>/dev/null || echo unavailable)" "$driver"
+        done
+    done
+    dmesg --color=never 2>&1 | \
+        grep -Ei 'Bluetooth|btusb|btmtk|hci[0-9]|1286|2059|0e8d|3603|PS5: using bulk OUT|opcode|xhci|usb.*disconnect|error -[0-9]+' | \
+        tail -n 160 || true
+
+    echo
+    echo "[pci]"
+    lspci -nnk 2>&1 || true
+
+    echo
+    echo "[display]"
+    for status_file in /sys/class/drm/card*-*/status; do
+        [ -e "$status_file" ] || continue
+        connector=${status_file%/status}
+        printf '%s=' "$status_file"
+        cat "$status_file" 2>/dev/null || true
+        if [ -e "$connector/modes" ]; then
+            printf '%s:\n' "$connector/modes"
+            cat "$connector/modes" 2>/dev/null || true
+        fi
+    done
+    for state_file in /sys/class/graphics/fb*/name /sys/class/graphics/fb*/modes; do
+        [ -e "$state_file" ] || continue
+        printf '%s:\n' "$state_file"
+        cat "$state_file" 2>/dev/null || true
+    done
+
+    echo
+    echo "[temperatures]"
+    sensors 2>&1 || true
+
+    # This profile loads the frequency drivers after the fan target is applied
+    # unless the FAT opt-out is present. Record the policy and resulting
+    # clocks and temperatures.
+    echo
+    echo "[thermals-and-clocks]"
+    if [ -r /etc/default/ps5-fan ]; then
+        grep -E '^PS5_FAN_TARGET_C=[0-9]+$' /etc/default/ps5-fan 2>/dev/null || true
+    fi
+    if [ -r /sys/bus/platform/devices/ps5-fan/target_temp ]; then
+        printf 'fan_target_temp_C='
+        timeout 15 cat /sys/bus/platform/devices/ps5-fan/target_temp 2>/dev/null || \
+            echo READ_FAILED
+    else
+        echo 'fan_target_temp_C=UNAVAILABLE'
+    fi
+    if [ -e /boot/efi/disable-ps5-performance ]; then
+        echo "performance opt-out: present"
+    else
+        echo "performance opt-out: absent"
+    fi
+    for module in k10temp ps5_cpufreq ps5_gpufreq; do
+        if [ -d "/sys/module/$module" ]; then
+            printf 'module %s loaded\n' "$module"
+        else
+            printf 'module %s not loaded\n' "$module"
+        fi
+    done
+    for hwmon in /sys/class/hwmon/hwmon*; do
+        [ -e "$hwmon/name" ] || continue
+        printf '%s name=%s\n' "$hwmon" "$(cat "$hwmon/name" 2>/dev/null)"
+        for value in "$hwmon"/temp*_input "$hwmon"/temp*_label \
+            "$hwmon"/freq*_input "$hwmon"/freq*_label \
+            "$hwmon"/power*_input "$hwmon"/power*_average \
+            "$hwmon"/in*_input "$hwmon"/fan*_input; do
+            [ -r "$value" ] || continue
+            printf '  %s=%s\n' "${value##*/}" "$(timeout 2 cat "$value" 2>/dev/null)"
+        done
+    done
+    for value in /sys/devices/system/cpu/cpufreq/boost \
+        /sys/devices/system/cpu/cpufreq/policy*/scaling_driver \
+        /sys/devices/system/cpu/cpufreq/policy*/scaling_governor \
+        /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq \
+        /sys/devices/system/cpu/cpufreq/policy*/scaling_min_freq \
+        /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq \
+        /sys/devices/system/cpu/cpufreq/policy*/scaling_available_frequencies \
+        /sys/devices/system/cpu/cpufreq/policy*/stats/total_trans; do
+        [ -r "$value" ] || continue
+        printf '%s=%s\n' "$value" "$(timeout 2 cat "$value" 2>/dev/null | tr '\n' ' ')"
+    done
+    [ -d /sys/devices/system/cpu/cpufreq/policy0 ] || echo "cpufreq: no policy"
+    grep -E '^cpu MHz' /proc/cpuinfo 2>/dev/null | sort | uniq -c || true
+    for dev in /sys/class/devfreq/*; do
+        [ -e "$dev" ] || continue
+        for attr in name governor cur_freq target_freq min_freq max_freq \
+            available_frequencies polling_interval; do
+            [ -r "$dev/$attr" ] || continue
+            printf '%s/%s=%s\n' "$dev" "$attr" \
+                "$(timeout 2 cat "$dev/$attr" 2>/dev/null | tr '\n' ' ')"
+        done
+    done
+    for card in /sys/class/drm/card*; do
+        case ${card##*/} in *-*) continue ;; esac
+        for attr in gpu_busy_percent pp_dpm_sclk pp_dpm_mclk pp_dpm_fclk \
+            pp_dpm_socclk power_dpm_force_performance_level; do
+            [ -r "$card/device/$attr" ] || continue
+            printf '%s/device/%s=%s\n' "$card" "$attr" \
+                "$(timeout 2 cat "$card/device/$attr" 2>/dev/null | tr '\n' ' ')"
+        done
+    done
+
+    echo
+    echo "[session-and-sleep]"
+    printf 'gdm='; systemctl is-active gdm.service 2>&1 || true
+    printf 'foreground vt='; fgconsole 2>&1 || true
+    loginctl list-sessions --no-legend 2>&1 || true
+    for target in sleep suspend hibernate hybrid-sleep suspend-then-hibernate; do
+        printf '%s.target=' "$target"
+        systemctl is-enabled "$target.target" 2>&1 || true
+    done
+
+    echo
+    echo "[kernel-7.3]"
+    dmesg --color=never 2>&1 | grep -E 'Strawberry was here|MP1ERROR|cpu frequency|gpufreq|cpufreq|vcn|VCN|Salina|amdgpu.*(ring|ip block)' \
+        | tail -n 80 || true
+
+    echo
+    echo "[services]"
+    # --lines=0: the unit log lines are in the journal tail, scrubbed.
+    systemctl --no-pager --full --lines=0 status \
+        NetworkManager.service bluetooth.service ssh.socket ssh.service \
+        ps5-ssh-host-keys.service gdm.service grow-rootfs.service \
+        ps5fan.service ps5-amdgpu-reprobe.service \
+        ps5-iw620-firmware.service ps5-bt-quiet.service ps5-performance.service \
+        ps5-boot-report.timer 2>&1 || true
+    systemctl --no-pager --full --failed 2>&1 || true
+    systemctl --no-pager --full list-jobs 2>&1 || true
+} > "$summary" 2>&1
+
+# Preserve the bring-up summary even if a noisy journal has very large records.
+# Everything is scrubbed before it is cut to size, so the limits still hold.
+scrub < "$summary" | head -c 393216 > "$bounded"
+
+{
+    printf '\n[kernel-tail; final 256 KiB]\n'
+    dmesg --color=never 2>&1 | tail -n 500 | scrub | tail -c 262144
+    printf '\n[journal-tail; final 383 KiB]\n'
+    journalctl -b --no-pager -n 800 2>&1 | scrub | tail -c 392192
+} >> "$bounded"
+
+test -s "$bounded"
+test "$(wc -c < "$bounded")" -le 1048576
+
+publish_report() {
+    destination=$1
+    temporary=$(mktemp "${destination}.new.XXXXXX") || return 1
+    if ! install -m 0600 "$bounded" "$temporary"; then
+        rm -f "$temporary"
+        temporary=
+        return 1
+    fi
+    if ! sync -f "$temporary"; then
+        rm -f "$temporary"
+        temporary=
+        return 1
+    fi
+    if ! mv -f "$temporary" "$destination"; then
+        rm -f "$temporary"
+        temporary=
+        return 1
+    fi
+    temporary=
+    sync -f "$destination" || \
+        echo "Could not flush $destination after rename" >&2
+}
+
+publish_report /var/log/ps5-boot-report.txt || \
+    echo "Could not publish /var/log/ps5-boot-report.txt" >&2
+
+if findmnt -rn /boot/efi >/dev/null 2>&1 && [ -w /boot/efi ]; then
+    publish_report /boot/efi/ps5-boot-report.txt || \
+        echo "Could not publish /boot/efi/ps5-boot-report.txt" >&2
+fi
+
+exit 0

@@ -1,0 +1,21 @@
+#!/bin/sh
+# preinst for linux-ps5 __KVER__ (PS5 Ubuntu 24.04 7.3 image).
+# scripts/package-linux-ps5-k73-deb.sh fills in the version.
+#
+# The postinst puts the new kernel and initramfs on the PS5 boot partition.
+# If /boot/efi is not mounted read-write, the console would keep booting the
+# old bzImage against this package's modules, so stop before anything is
+# unpacked.
+set -e
+
+case "$1" in
+    install|upgrade)
+        if [ -x /usr/local/sbin/ps5-update-boot-files ]; then
+            if ! /usr/local/sbin/ps5-update-boot-files --precheck; then
+                echo "linux-ps5: not installing __KVER__ because /boot/efi cannot be updated" >&2
+                exit 1
+            fi
+        fi
+        ;;
+esac
+exit 0

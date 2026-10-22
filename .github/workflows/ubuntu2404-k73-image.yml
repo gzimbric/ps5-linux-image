@@ -1,0 +1,733 @@
+name: Ubuntu 24.04 7.3 image
+run-name: Ubuntu 24.04 7.3 image (${{ github.ref_name }})
+
+# Builds Ubuntu 24.04 LTS on Linux 7.3.0 for regular (fat and slim) PS5
+# consoles on firmware 11.xx and 13.xx, on GitHub-hosted x86_64 runners, in
+# two jobs:
+#
+#   kernel  The linux-ps5 7.3.0 kernel bundle from the CachyOS 7.3 workflow:
+#           the same scripts, the same input fingerprint, the same cache key
+#           and paths and the same artifact name, so the cache entry is
+#           shared and both images get the same kernel. This workflow also
+#           accepts a CachyOS 7.3 run as a kernel_run_id donor.
+#   image   Turns that bundle into the linux-ps5 .deb, builds the
+#           distros/ubuntu2404-k73 root filesystem with distrobuilder, zeroes
+#           the free blocks, checks the image read-only, compresses it to one
+#           .img.xz and attaches it to a draft prerelease.
+#
+# Nothing is public until the draft is reviewed and published by hand. The
+# image is one .img.xz, never split; if it comes out at 2 GiB or more the job
+# fails before the release step. If creating the draft fails, the release
+# files are kept as a workflow artifact for 7 days, so the draft can be made
+# by hand without building again.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag for the draft release (created when the draft is published). Default: ubuntu2404-k73-image-<run number>'
+        type: string
+        default: ''
+      patches_repo:
+        description: 'Fetch the 7.3 patch set from this git URL (a mirror) instead of rmuxnet/ps5-linux-patches-1. It must still have the pinned commit, and the files are still checked by SHA-256.'
+        type: string
+        default: ''
+      kernel_run_id:
+        description: 'Optional successful run ID of this workflow or the CachyOS 7.3 workflow whose kernel bundle to reuse. Its source inputs and downloaded bundle are verified before use.'
+        type: string
+        default: ''
+  # Pushes to this branch build only when something the image is made from
+  # changes. Never add a tag trigger: publishing a draft creates its
+  # ubuntu2404-k73-image-N tag.
+  push:
+    branches:
+      - ubuntu2404-k73-image
+    paths:
+      - '.github/workflows/ubuntu2404-k73-image.yml'
+      - '.github/workflows/cachyos1160-k73-image.yml'
+      - '.dockerignore'
+      - 'boot/**'
+      - 'distros/ubuntu2404-k73/**'
+      - '!distros/ubuntu2404-k73/README.md'
+      - 'distros/cachyos1160-k73/kernel/**'
+      - 'distros/cachyos1160-k73/files/ps5-1160-check-boot-files'
+      - 'docker/kernel-builder/**'
+      - 'docker/image-builder/**'
+      - 'scripts/build-linux-ps5-k73.sh'
+      - 'scripts/package-linux-ps5-k73.sh'
+      - 'scripts/package-linux-ps5-k73-deb.sh'
+      - 'scripts/build-ubuntu2404-k73-image.sh'
+      - 'scripts/verify-ubuntu2404-k73-image.sh'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ubuntu2404-k73-image
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The kernel bundle is shared with .github/workflows/cachyos1160-k73-image.yml.
+  # actions/cache matches on the key and on these exact paths, so KERNEL_DIR
+  # and PACKAGE have to stay the same as there; the kernel job checks that.
+  CACHYOS_WORKFLOW: .github/workflows/cachyos1160-k73-image.yml
+  KERNEL_DIR: linux-bin/cachyos1160-k73
+  PACKAGE: linux-ps5-7.3.0-4-x86_64.pkg.tar.zst
+  DEB_DIR: linux-bin/ubuntu2404-k73
+  DEB: linux-ps5_7.3.0-5_amd64.deb
+
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      # The kernel tree, the Docker builder and the staged modules and headers.
+      MIN_FREE_GB: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The input list, the key format and the bundle paths come from the
+      # CachyOS 7.3 workflow, so this job builds or finds the same bundle.
+      - name: Read the shared kernel inputs
+        id: kernel-inputs
+        run: |
+          set -euo pipefail
+          grep -qxF "  KERNEL_DIR: $KERNEL_DIR" "$CACHYOS_WORKFLOW" ||
+            { echo "::error::$CACHYOS_WORKFLOW no longer uses KERNEL_DIR $KERNEL_DIR"; exit 1; }
+          grep -qxF "  PACKAGE: $PACKAGE" "$CACHYOS_WORKFLOW" ||
+            { echo "::error::$CACHYOS_WORKFLOW no longer uses PACKAGE $PACKAGE"; exit 1; }
+          # shellcheck disable=SC2016 # the literal key line in that workflow
+          grep -qF 'echo "key=linux-ps5-k73-bundle-v1-${RUNNER_OS}-${RUNNER_ARCH}-${PACKAGE}-${fingerprint}"' \
+            "$CACHYOS_WORKFLOW" ||
+            { echo "::error::$CACHYOS_WORKFLOW changed its kernel cache key"; exit 1; }
+          # The paths in its "for input_path in \ ... ; do" loop.
+          awk '
+            /^[[:space:]]*for input_path in \\$/ { listing = 1; next }
+            listing {
+              line = $0
+              sub(/^[[:space:]]+/, "", line)
+              last = (line ~ /; do$/)
+              sub(/( \\|; do)$/, "", line)
+              print line
+              if (last) exit
+            }
+          ' "$CACHYOS_WORKFLOW" > "$RUNNER_TEMP/kernel-input-paths.txt"
+          cat "$RUNNER_TEMP/kernel-input-paths.txt"
+          count=$(grep -c . "$RUNNER_TEMP/kernel-input-paths.txt" || true)
+          if [ "$count" -lt 5 ] ||
+            grep -vqE '^[A-Za-z0-9._/-]+$' "$RUNNER_TEMP/kernel-input-paths.txt" ||
+            ! grep -qxF docker/kernel-builder/build-k73.sh "$RUNNER_TEMP/kernel-input-paths.txt" ||
+            [ -n "$(sort "$RUNNER_TEMP/kernel-input-paths.txt" | uniq -d)" ]; then
+            echo "::error::could not read the kernel input list from $CACHYOS_WORKFLOW"
+            exit 1
+          fi
+          inputs="$RUNNER_TEMP/kernel-inputs.txt"
+          : > "$inputs"
+          while read -r input_path; do
+            printf '%s %s\n' "$input_path" "$(git rev-parse "HEAD:$input_path")" >> "$inputs"
+          done < "$RUNNER_TEMP/kernel-input-paths.txt"
+          cat "$inputs"
+          fingerprint=$(sha256sum "$inputs" | cut -d' ' -f1)
+          [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]]
+          echo "key=linux-ps5-k73-bundle-v1-${RUNNER_OS}-${RUNNER_ARCH}-${PACKAGE}-${fingerprint}" \
+            >> "$GITHUB_OUTPUT"
+
+      # Exactly the cache entry the CachyOS 7.3 workflow saves and restores.
+      # There are no restore keys: a bundle made from any other input set is
+      # a miss.
+      - name: Restore exact kernel bundle
+        id: kernel-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}
+            ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}.sha256
+            ${{ env.KERNEL_DIR }}/kernel/
+            ${{ env.KERNEL_DIR }}/ps5-iw620/
+            ${{ env.KERNEL_DIR }}/kernel-cache-manifest.sha256
+          key: ${{ steps.kernel-inputs.outputs.key }}
+
+      - name: Check reused kernel run
+        id: reused-kernel
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id != ''
+        uses: actions/github-script@v8
+        env:
+          KERNEL_RUN_ID: ${{ inputs.kernel_run_id }}
+        with:
+          script: |
+            const text = process.env.KERNEL_RUN_ID;
+            if (!/^[1-9][0-9]*$/.test(text)) {
+              core.setFailed(`invalid kernel_run_id: ${text}`);
+              return;
+            }
+            const runId = Number(text);
+            if (!Number.isSafeInteger(runId)) {
+              core.setFailed(`kernel_run_id is outside the safe integer range: ${text}`);
+              return;
+            }
+            const { owner, repo } = context.repo;
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: runId,
+            });
+            // Both workflows make the same bundle from the same inputs; the
+            // next step compares the donor's inputs with this commit's.
+            const workflows = [
+              '.github/workflows/ubuntu2404-k73-image.yml',
+              '.github/workflows/cachyos1160-k73-image.yml',
+            ];
+            if (!workflows.includes(run.path) || run.status !== 'completed') {
+              core.setFailed(`run ${runId} is not a completed run of the Ubuntu or CachyOS 7.3 workflow`);
+              return;
+            }
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { owner, repo, run_id: runId, per_page: 100 },
+            );
+            const kernel = jobs.find(job => job.name === 'kernel');
+            if (!kernel || kernel.conclusion !== 'success') {
+              core.setFailed(`run ${runId} has no successful kernel job`);
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              { owner, repo, run_id: runId, per_page: 100 },
+            );
+            const matches = artifacts.filter(
+              artifact => artifact.name === 'linux-ps5-k73' && !artifact.expired,
+            );
+            if (matches.length !== 1) {
+              core.setFailed(`run ${runId} has ${matches.length} usable linux-ps5-k73 artifacts`);
+              return;
+            }
+            core.setOutput('head_sha', run.head_sha);
+            core.notice(`Reusing kernel artifact ${matches[0].id} from run ${runId} at ${run.head_sha}`);
+
+      - name: Match reused kernel inputs
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id != ''
+        env:
+          DONOR_SHA: ${{ steps.reused-kernel.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$DONOR_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags --depth=1 origin "$DONOR_SHA"
+          donor_inputs="$RUNNER_TEMP/kernel-inputs-donor.txt"
+          : > "$donor_inputs"
+          while read -r input_path _; do
+            donor_object=$(git rev-parse "$DONOR_SHA:$input_path")
+            printf '%s %s\n' "$input_path" "$donor_object" >> "$donor_inputs"
+          done < "$RUNNER_TEMP/kernel-inputs.txt"
+          diff -u "$RUNNER_TEMP/kernel-inputs.txt" "$donor_inputs"
+
+      - name: Download reused kernel bundle
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id != ''
+        uses: actions/download-artifact@v6
+        with:
+          name: linux-ps5-k73
+          path: ${{ env.KERNEL_DIR }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.kernel_run_id }}
+
+      - name: Check disk space
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
+        run: |
+          set -euo pipefail
+          free_gb() { df -B1G --output=avail / | tail -n1 | tr -d ' '; }
+          df -h /
+          echo "CPUs: $(nproc)"; free -h
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "Removing preinstalled toolchains to make room"
+            sudo rm -rf \
+              /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+              /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
+              /usr/local/share/powershell /usr/local/share/chromium \
+              /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+            docker system prune --all --force >/dev/null
+            df -h /
+          fi
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "::error::only $(free_gb) GB free on /, need $MIN_FREE_GB GB"
+            exit 1
+          fi
+
+      - name: Install packaging tools
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libarchive-tools zstd
+
+      - name: Build kernel and Wi-Fi modules
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
+        env:
+          PATCHES_REPO_INPUT: ${{ inputs.patches_repo }}
+        run: |
+          set -euo pipefail
+          patches_args=()
+          if [ -n "${PATCHES_REPO_INPUT:-}" ]; then
+            patches_args=(--patches-repo "$PATCHES_REPO_INPUT")
+          fi
+          ./scripts/build-linux-ps5-k73.sh --out "$KERNEL_DIR" "${patches_args[@]}"
+
+      - name: Package linux-ps5
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
+        run: sudo ./scripts/package-linux-ps5-k73.sh --kernel-dir "$KERNEL_DIR"
+
+      - name: Record kernel bundle manifest
+        if: steps.kernel-cache.outputs.cache-hit != 'true' && inputs.kernel_run_id == ''
+        run: |
+          set -euo pipefail
+          cd "$KERNEL_DIR"
+          unexpected=$(find "$PACKAGE" "$PACKAGE.sha256" kernel ps5-iw620 \
+            ! -type d ! -type f -print)
+          if [ -n "$unexpected" ]; then
+            echo "::error::kernel bundle has a symlink or special file"
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+          find "$PACKAGE" "$PACKAGE.sha256" kernel ps5-iw620 \
+            -type f -print0 | sort -z | xargs -0 sha256sum \
+            > kernel-cache-manifest.sha256
+
+      - name: Check kernel outputs
+        run: |
+          set -euo pipefail
+          test -s "$KERNEL_DIR/kernel-cache-manifest.sha256"
+          (
+            cd "$KERNEL_DIR"
+            unexpected=$(find "$PACKAGE" "$PACKAGE.sha256" kernel ps5-iw620 \
+              kernel-cache-manifest.sha256 ! -type d ! -type f -print)
+            if [ -n "$unexpected" ]; then
+              echo "::error::kernel bundle has a symlink or special file"
+              printf '%s\n' "$unexpected"
+              exit 1
+            fi
+            sha256sum -c kernel-cache-manifest.sha256
+          )
+          ./distros/ubuntu2404-k73/files/ps5-check-boot-files "$KERNEL_DIR/kernel/bzImage"
+          (cd "$KERNEL_DIR" && sha256sum -c "$PACKAGE.sha256" && cd ps5-iw620 && sha256sum -c SHA256SUMS)
+          # This image needs the MediaTek Bluetooth patches in the kernel.
+          grep -q 'ps5-mt7921-btusb-bulk-out.patch sha256' "$KERNEL_DIR/kernel/kernel-build-info.txt"
+          grep -q 'ps5-mt7921-l2cap-defer-security.patch sha256' "$KERNEL_DIR/kernel/kernel-build-info.txt"
+          # The last line comes from the CachyOS boot-file check; this image
+          # is not tied to one firmware's loader.
+          {
+            echo '```'
+            sed 's/^ok: the bounded 11.60 loader limits are met$/ok: the PS5 loader limits are met/' \
+              "$KERNEL_DIR/kernel/kernel-build-info.txt"
+            echo
+            echo "IW620 modules:"
+            cat "$KERNEL_DIR/ps5-iw620/SHA256SUMS"
+            echo
+            cat "$KERNEL_DIR/$PACKAGE.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload kernel
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-ps5-k73
+          path: |
+            ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}
+            ${{ env.KERNEL_DIR }}/${{ env.PACKAGE }}.sha256
+            ${{ env.KERNEL_DIR }}/kernel/
+            ${{ env.KERNEL_DIR }}/ps5-iw620/
+            ${{ env.KERNEL_DIR }}/kernel-cache-manifest.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  image:
+    needs: kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    permissions:
+      contents: write
+    env:
+      IMAGE: output/ps5-ubuntu2404-k73.img
+      OUT: output
+      DIST: dist
+      # 12000 MiB fits a 16 GB USB drive; the root partition grows on first
+      # boot.
+      IMG_SIZE_MIB: 12000
+      # Docker images, the root filesystem volume, the sparse raw image and
+      # the compressed image.
+      MIN_FREE_GB: 30
+      # xz otherwise applies its roughly 4 GiB automatic memory ceiling and
+      # drops this four-core runner to three compression threads.
+      XZ_COMPRESS_MEMLIMIT: 8GiB
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          free_gb() { df -B1G --output=avail / | tail -n1 | tr -d ' '; }
+          echo "Initial disk space:"
+          df -h /
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "Removing preinstalled toolchains to make room"
+            sudo rm -rf \
+              /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+              /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost \
+              /usr/local/share/powershell /usr/local/share/chromium \
+              /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+            docker system prune --all --force >/dev/null
+            echo "After cleanup:"
+            df -h /
+          else
+            echo "Cleanup not needed: $(free_gb) GiB free, need $MIN_FREE_GB GiB"
+          fi
+          echo "CPUs: $(nproc)"; free -h
+          if [ "$(free_gb)" -lt "$MIN_FREE_GB" ]; then
+            echo "::error::only $(free_gb) GiB free on /, need $MIN_FREE_GB GiB"
+            exit 1
+          fi
+
+      - name: Start disk sampler
+        run: |
+          # shellcheck disable=SC2016 # the inner bash expands these
+          nohup bash -c 'while true; do
+            echo "$(date -u +%H:%M:%S) $(df -B1M --output=avail / | tail -n1 | tr -d " ")"
+            sleep 20
+          done' > "$RUNNER_TEMP/disk-free-mb.log" 2>&1 &
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils dosfstools e2fsprogs mount util-linux \
+            xz-utils zerofree zstd
+
+      - name: Download kernel
+        uses: actions/download-artifact@v6
+        with:
+          name: linux-ps5-k73
+          path: ${{ env.KERNEL_DIR }}
+
+      - name: Check kernel download
+        run: |
+          set -euo pipefail
+          cd "$KERNEL_DIR"
+          test -s kernel-cache-manifest.sha256
+          unexpected=$(find "$PACKAGE" "$PACKAGE.sha256" kernel ps5-iw620 \
+            kernel-cache-manifest.sha256 ! -type d ! -type f -print)
+          if [ -n "$unexpected" ]; then
+            echo "::error::kernel bundle has a symlink or special file"
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+          sha256sum -c kernel-cache-manifest.sha256
+          sha256sum -c "$PACKAGE.sha256"
+          (cd ps5-iw620 && sha256sum -c SHA256SUMS)
+          ls -lR
+
+      - name: Package linux-ps5 .deb
+        run: ./scripts/package-linux-ps5-k73-deb.sh --kernel-dir "$KERNEL_DIR" --package "$KERNEL_DIR/$PACKAGE" --out "$DEB_DIR"
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo ./scripts/build-ubuntu2404-k73-image.sh --deb "$DEB_DIR/$DEB" \
+            --kernel-dir "$KERNEL_DIR" --out-dir "$OUT" --img-size "$IMG_SIZE_MIB"
+          # The distrobuilder download cache and the image builder are no
+          # longer needed.
+          sudo rm -rf work/cache-ubuntu2404-k73
+          docker image rm ps5-image-builder >/dev/null 2>&1 || true
+          df -h /
+
+      - name: Zero free blocks in the root filesystem
+        run: |
+          set -euo pipefail
+          # Moving /boot/efi to the FAT partition leaves the kernel and
+          # initramfs in free ext4 blocks, and xz would compress them too.
+          # The FAT boot partition is not touched.
+          loop=$(sudo losetup --find --show --partscan "$IMAGE")
+          trap 'sudo losetup -d "$loop"' EXIT
+          sudo udevadm settle
+
+          # Find the root by its filesystem type, not by partition number.
+          root=
+          for nr in $(sudo partx --noheadings --output NR "$loop"); do
+            part=${loop}p$nr
+            if [ ! -b "$part" ]; then
+              echo "::error::$part did not appear after losetup --partscan"
+              exit 1
+            fi
+            fstype=$(sudo blkid -p -o value -s TYPE "$part" || true)
+            echo "partition $nr: ${fstype:-no filesystem}"
+            if [ "$fstype" = ext4 ]; then
+              if [ -n "$root" ]; then
+                echo "::error::more than one ext4 partition in the image"
+                exit 1
+              fi
+              root=$part
+            fi
+          done
+          if [ -z "$root" ]; then
+            echo "::error::no ext4 partition in the image"
+            exit 1
+          fi
+          echo "Root filesystem: $root"
+
+          if ! sudo e2fsck -fn "$root"; then
+            echo "::error::the root filesystem is not clean, not zeroing it"
+            exit 1
+          fi
+          # zerofree -v prints a progress counter, dropped here, and then the
+          # zeroed/free/total block counts.
+          sudo zerofree -v "$root" 2>&1 | tr '\r' '\n' | grep -v '%$'
+          sudo e2fsck -fn "$root"
+
+      - name: Verify image
+        run: |
+          set -euo pipefail
+          mkdir -p "$DIST"
+          sudo ./scripts/verify-ubuntu2404-k73-image.sh --image "$IMAGE" \
+            --kernel-dir "$KERNEL_DIR" --deb "$DEB_DIR/$DEB" \
+            --packages "$DIST/ubuntu2404-k73-packages.txt"
+          sudo chown "$(id -u):$(id -g)" "$DIST/ubuntu2404-k73-packages.txt"
+
+      - name: Record boot files
+        run: |
+          set -euo pipefail
+          # Partition 2 is the FAT boot partition.
+          read -r start sectors < <(
+            partx --noheadings --output START,SECTORS --nr 2 "$IMAGE")
+          boot=$(mktemp -d)
+          sudo mount -t vfat \
+            -o "ro,loop,offset=$((start * 512)),sizelimit=$((sectors * 512))" \
+            "$IMAGE" "$boot"
+          trap 'sudo umount "$boot"' EXIT
+          mkdir -p "$DIST"
+          (cd "$boot" && sha256sum bzImage initrd.img cmdline.txt vram.txt kexec.sh) \
+            > "$DIST/boot-files.sha256"
+          (cd "$boot" && stat -c '%-12n %10s bytes' bzImage initrd.img cmdline.txt vram.txt kexec.sh) \
+            > "$DIST/boot-files.sizes"
+          ./distros/ubuntu2404-k73/files/ps5-check-boot-files \
+            "$boot/bzImage" "$boot/initrd.img" "$boot/cmdline.txt" |
+            sed "s#$boot/##" > "$DIST/boot-files.check"
+          cat "$DIST/boot-files.sha256" "$DIST/boot-files.sizes" "$DIST/boot-files.check"
+
+      - name: Compress
+        run: |
+          set -euo pipefail
+          # Each GitHub release file must be under 2 GiB. The image is not split.
+          limit=2147483648
+          raw_sha=$(sha256sum "$IMAGE" | awk '{print $1}')
+          xz -T0 -9 --memlimit-compress="$XZ_COMPRESS_MEMLIMIT" -c "$IMAGE" \
+            > "$DIST/ps5-ubuntu2404-k73.img.xz"
+          cp "$DEB_DIR/$DEB" "$DIST/"
+
+          cd "$DIST"
+          xz_size=$(stat -c %s ps5-ubuntu2404-k73.img.xz)
+          echo "ps5-ubuntu2404-k73.img.xz: $xz_size bytes (limit: under $limit)"
+          if [ "$xz_size" -ge "$limit" ]; then
+            echo "::error::ps5-ubuntu2404-k73.img.xz is $xz_size bytes, over GitHub's 2 GiB per-file limit (release files must be under $limit bytes). The image must be made smaller; it is not split, and no release was created."
+            exit 1
+          fi
+          # The upload must decompress to the image that was checked.
+          roundtrip_sha=$(xz -T0 -dc ps5-ubuntu2404-k73.img.xz | sha256sum | awk '{print $1}')
+          if [ "$roundtrip_sha" != "$raw_sha" ]; then
+            echo "::error::decompressed ps5-ubuntu2404-k73.img.xz does not match the raw image"
+            exit 1
+          fi
+
+          {
+            echo "$raw_sha  ps5-ubuntu2404-k73.img"
+            sha256sum ps5-ubuntu2404-k73.img.xz "$DEB" ubuntu2404-k73-packages.txt
+          } > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+
+      - name: Write build info
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          min_free=$(awk '{print $2}' "$RUNNER_TEMP/disk-free-mb.log" | sort -n | head -n1)
+          {
+            echo "PS5 Ubuntu 24.04 LTS image on Linux 7.3.0, firmware 11.xx and 13.xx (regular PS5, not Pro)"
+            echo
+            echo "Commit:      $GITHUB_SHA ($GITHUB_REF_NAME)"
+            echo "Build run:   $RUN_URL"
+            echo "Finished:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Raw image:   $(stat -c %s "$IMAGE") bytes"
+            echo "Packages:    $(wc -l < "$DIST/ubuntu2404-k73-packages.txt") installed, listed in ubuntu2404-k73-packages.txt"
+            echo "Fan policy:  ICC autoservo target 65 C with immediate readback"
+            echo "Lowest free disk on / during the build: ${min_free} MiB"
+            echo
+            echo "Kernel package:"
+            cat "$DEB_DIR/$DEB.sha256"
+            echo "made from:"
+            cat "$KERNEL_DIR/$PACKAGE.sha256"
+            echo
+            echo "Shared kernel build:"
+            sed 's/^ok: the bounded 11.60 loader limits are met$/ok: the PS5 loader limits are met/' \
+              "$KERNEL_DIR/kernel/kernel-build-info.txt"
+            echo
+            echo "IW620 Wi-Fi modules (in the linux-ps5 package, under /usr/lib/modules/7.3.0/updates/ps5-iw620):"
+            cat "$KERNEL_DIR/ps5-iw620/SHA256SUMS"
+            echo
+            echo "FAT boot partition files:"
+            cat "$DIST/boot-files.sha256"
+            cat "$DIST/boot-files.sizes"
+            echo
+            echo "Loader limits check (ps5-check-boot-files):"
+            cat "$DIST/boot-files.check"
+            echo
+            echo "Release files:"
+            cat "$DIST/SHA256SUMS"
+          } > "$DIST/build-info.txt"
+          cat "$DIST/build-info.txt"
+          { echo '```'; cat "$DIST/build-info.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload checksums
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu2404-k73-checksums
+          path: |
+            dist/SHA256SUMS
+            dist/boot-files.sha256
+            dist/boot-files.check
+            dist/build-info.txt
+            dist/ubuntu2404-k73-packages.txt
+          if-no-files-found: ignore
+
+      - name: Create draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.release_tag || format('ubuntu2404-k73-image-{0}', github.run_number) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::invalid release tag: $TAG"
+            exit 1
+          fi
+          cd "$DIST"
+
+          cat > release-notes.md <<EOF
+          **Ubuntu 24.04 LTS on Linux 7.3.0 for regular PS5 consoles (fat and slim) on firmware 11.xx and 13.xx. Tester build: this exact image has not been booted on hardware yet.** PS5 Pro is not supported. Read the [profile notes](https://github.com/gzimbric/ps5-linux-image/blob/${GITHUB_SHA}/distros/ubuntu2404-k73/README.md) first. Fully power off between attempts instead of using Linux sleep or Rest Mode.
+
+          Built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). The hosted build and its read-only image checks passed; that is not a console boot.
+
+          ### What's in it
+
+          - Ubuntu 24.04 LTS desktop (GNOME, Firefox from the Mozilla PPA), logging in as \`ps5\` automatically.
+          - \`linux-ps5 7.3.0-5\`: mainline Linux 7.3 with rmux's 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`), kernel build #5: CachyOS Image 4's kernel plus the two MediaTek Bluetooth patches. On top: VivaLaVent's IW620 btusb fix from [ps5-bazzite-deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), and from [v1.0.4](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.4) the MediaTek Bluetooth fixes: WizGery's bulk OUT endpoint fix (from ps5-mediatek-fixes, ported to 7.3) and an L2CAP change that waits for encryption instead of refusing early connections. The image adds the matching udev rule (turns off the phantom second controller on interfaces 3 and 4 of USB \`0e8d:3603\`, also in the initramfs) and \`btusb enable_autosuspend=0\`, which applies to every btusb controller, the IW620 included.
+          - The CPU and GPU frequency drivers, loaded by \`ps5-performance.service\` after the fan target is set. To skip them, create an empty \`/boot/efi/disable-ps5-performance\` and fully power off.
+          - Fan: the ICC's automatic controller stays on with a 65 C target, set in \`/etc/default/ps5-fan\`.
+          - Wi-Fi: the IW620 driver (ps5-linux-mwifiex \`4bce848\` with the 7.3 compatibility patch, shipped in \`linux-ps5\`) and Linux 7.3's \`mt7921e\` for MediaTek consoles. The image has no IW620 firmware; the Wi-Fi loader writes the console's own copy to \`lib/nxp/\` on the boot partition and \`ps5-iw620-firmware.service\` installs it. Dumps from 11.xx (498108 bytes) and 13.xx (500296 bytes) loaders are both accepted. Never share that file.
+          - apt holds \`linux-ps5\`. When a package update rebuilds the initramfs, an initramfs-tools hook checks the new files and updates \`bzImage\` and \`initrd.img\` on the boot partition. When the kernel changes, the old pair is kept as \`bzImage.prev\` and \`initrd.img.prev\`.
+          - \`ps5-boot-report.txt\` on the boot partition after each boot. It hides Wi-Fi names and MAC addresses but keeps IP addresses; check it before posting.
+
+          ### Loader
+
+          Use a loader build that supports your firmware, does not need exact boot-file sizes and passes the Wi-Fi firmware to Linux on IW620 consoles, for example Sonic's 11.xx/13.xx release or a current [ps5-linux-loader](https://github.com/ps5-linux/ps5-linux-loader) build. Loader builds that need exact boot-file sizes, such as the 11.60 builds used with the Ubuntu 24.04 7.1.7 image (\`firmware-11.60-dma-e820-run18\`, the \`linux-1160-dma-e820-wifi\` target), refuse these files. On 11.60 the bounded builds from [\`firmware-11.60-dma-e820-bounded-run21\`](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21) also work: the Wi-Fi ELF on IW620 consoles, the non-Wi-Fi ELF on MediaTek consoles. The boot files need no exact sizes: \`bzImage\` is a relocatable KASLR kernel and \`bzImage\` plus \`initrd.img\` stay well under 160 MiB. Don't add \`nokaslr\`, \`mem=\` or \`memmap=\` to \`cmdline.txt\`.
+
+          ### MediaTek consoles
+
+          If the console freezes about 20 seconds after boot, add \`module_blacklist=btusb\` to the end of the line in \`cmdline.txt\` (Bluetooth is then off, Wi-Fi still works) and report it with \`ps5-boot-report.txt\`. \`btusb.ps5_tx_ep=0\` goes back to the stock Bluetooth endpoint for a test.
+
+          ### Login
+
+          Login is \`ps5\` / \`ubuntu\`, and SSH accepts that password. \`ps5\` has passwordless sudo. Run \`passwd\` after the first boot, and keep the console on a trusted network until you do. The image ships without apt package lists, so run \`sudo apt update\` before installing anything.
+
+          ### Download and flash
+
+          **Flashing destroys everything on the selected drive. Check the device path and unplug other removable drives first.** Download \`ps5-ubuntu2404-k73.img.xz\` and \`SHA256SUMS\` into one folder, then on Linux:
+
+          \`\`\`
+          sha256sum -c --ignore-missing SHA256SUMS
+          xz -dc ps5-ubuntu2404-k73.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+          \`\`\`
+
+          On macOS use \`shasum -a 256 -c --ignore-missing SHA256SUMS\`. balenaEtcher and Raspberry Pi Imager can flash the \`.img.xz\` directly. The image is $(stat -c %s "$GITHUB_WORKSPACE/$IMAGE" | sed ':a;s/\B[0-9]\{3\}\>/,&/;ta') bytes and fits a 16 GB drive; the root partition grows to fill the drive on first boot.
+
+          ### Checksums
+
+          \`\`\`
+          $(cat SHA256SUMS)
+          \`\`\`
+
+          FAT boot partition files:
+
+          \`\`\`
+          $(cat boot-files.sha256)
+          $(cat boot-files.sizes)
+          \`\`\`
+          EOF
+
+          title="Ubuntu 24.04 on Linux 7.3.0 for PS5 ($TAG)"
+          assets=(ps5-ubuntu2404-k73.img.xz SHA256SUMS build-info.txt \
+            ubuntu2404-k73-packages.txt "$DEB")
+          if is_draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$is_draft" != true ]; then
+              echo "::error::release $TAG already exists and is not a draft"
+              exit 1
+            fi
+            # A rerun for the same tester build replaces the obsolete draft in
+            # place, keeping one release rather than creating split downloads.
+            gh release edit "$TAG" --draft --prerelease --target "$GITHUB_SHA" \
+              --title "$title" --notes-file release-notes.md
+            gh release upload "$TAG" "${assets[@]}" --clobber
+            url=$(gh release view "$TAG" --json url --jq .url)
+          else
+            url=$(gh release create "$TAG" --draft --prerelease --target "$GITHUB_SHA" \
+              --title "$title" --notes-file release-notes.md "${assets[@]}")
+          fi
+          echo "Draft release: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The image only exists on this runner. If the draft could not be made,
+      # keep what it would have held, so it can be made by hand.
+      - name: Keep the release files
+        if: failure() && steps.release.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu2404-k73-release-files
+          path: |
+            dist/ps5-ubuntu2404-k73.img.xz
+            dist/SHA256SUMS
+            dist/build-info.txt
+            dist/ubuntu2404-k73-packages.txt
+            dist/${{ env.DEB }}
+            dist/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Say how to finish the release
+        if: failure() && steps.release.outcome == 'failure'
+        env:
+          TAG: ${{ inputs.release_tag || format('ubuntu2404-k73-image-{0}', github.run_number) }}
+        run: |
+          {
+            echo "Creating the draft release failed. The release files are in the"
+            echo "ubuntu2404-k73-release-files artifact for 7 days. To finish it:"
+            echo
+            echo '```'
+            echo "gh run download $GITHUB_RUN_ID -R $GITHUB_REPOSITORY -n ubuntu2404-k73-release-files -D release-files"
+            echo "cd release-files && sha256sum -c --ignore-missing SHA256SUMS"
+            echo "gh release create $TAG -R $GITHUB_REPOSITORY --draft --prerelease --target $GITHUB_SHA \\"
+            echo "  --title 'Ubuntu 24.04 on Linux 7.3.0 for PS5 ($TAG)' --notes-file release-notes.md \\"
+            echo "  ps5-ubuntu2404-k73.img.xz SHA256SUMS build-info.txt ubuntu2404-k73-packages.txt $DEB"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

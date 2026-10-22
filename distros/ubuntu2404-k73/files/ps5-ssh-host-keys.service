@@ -1,0 +1,22 @@
+[Unit]
+Description=Generate unique SSH host keys
+# The earlier Ubuntu 24.04 image (Linux 7.1.7) ordered this after
+# basic.target, the default, and before ssh.socket, which systemd starts
+# before basic.target: an ordering cycle. Run it early instead, as soon as
+# the root filesystem is writable.
+DefaultDependencies=no
+After=local-fs.target
+Before=ssh.service ssh.socket shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+UMask=0077
+RuntimeDirectory=sshd
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/ssh-keygen -A
+ExecStart=/usr/sbin/sshd -t
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# /etc/initramfs-tools/modules for the PS5 Ubuntu 24.04 7.3 image. With
+# MODULES=list only these modules (and what they need) go in the initramfs.
+# USB root drive
+xhci_pci
+xhci_hcd
+usb_storage
+uas
+sd_mod
+# Root and boot filesystems
+ext4
+vfat
+# Early display
+amdgpu
+# Recovery input
+usbhid
+hid_generic

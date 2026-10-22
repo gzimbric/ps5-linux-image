@@ -1,0 +1,22 @@
+#!/bin/sh
+# postrm for linux-ps5 __KVER__ (PS5 Ubuntu 24.04 7.3 image).
+# scripts/package-linux-ps5-k73-deb.sh fills in the version.
+#
+# Removes what the postinst generated. The copies on /boot/efi stay.
+set -e
+
+KVER=__KVER__
+
+case "$1" in
+    remove|purge)
+        rm -f "/boot/initrd.img-$KVER" "/boot/initrd.img-$KVER.bak" \
+            "/var/lib/initramfs-tools/$KVER"
+        for index in modules.alias modules.alias.bin modules.builtin.alias.bin \
+            modules.builtin.bin modules.dep modules.dep.bin modules.devname \
+            modules.softdep modules.symbols modules.symbols.bin modules.weakdep; do
+            rm -f "/usr/lib/modules/$KVER/$index"
+        done
+        rmdir --ignore-fail-on-non-empty "/usr/lib/modules/$KVER" 2>/dev/null || true
+        ;;
+esac
+exit 0

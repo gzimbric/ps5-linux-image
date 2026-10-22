@@ -1,0 +1,16 @@
+#!/bin/sh
+for i in $(seq 1 15); do
+    [ -n "$(ls /sys/class/bluetooth/hci* 2>/dev/null)" ] && break
+    sleep 1
+done
+for h in /sys/class/bluetooth/hci*; do
+    [ -e "$h/address" ] || continue
+    idx=$(basename "$h" | sed 's/hci//')
+    addr=$(cat "$h/address")
+    if [ "$addr" = "00:00:00:00:00:00" ]; then
+        hciconfig hci$idx down 2>/dev/null || btmgmt -i $idx power off 2>/dev/null || true
+    else
+        bluetoothctl -- select "$addr" >/dev/null 2>&1 || true
+        bluetoothctl -- power on       >/dev/null 2>&1 || true
+    fi
+done

@@ -1,0 +1,51 @@
+#!/bin/bash
+# Grows the root partition and filesystem to fill the disk.
+# Runs once on first boot, then disables itself.
+set -e
+export LC_ALL=C
+
+ROOT_DEV=$(findmnt -no SOURCE /)
+DISK=$(lsblk -ndo PKNAME "$ROOT_DEV")
+ROOT_NAME=$(basename "$ROOT_DEV")
+PART_NUM=$(cat "/sys/class/block/$ROOT_NAME/partition")
+
+test -n "$DISK"
+test -n "$PART_NUM"
+lsblk -o NAME,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINTS "/dev/$DISK"
+
+GROW_STATUS=1
+GROW_ATTEMPT=1
+while [ "$GROW_ATTEMPT" -le 3 ]; do
+    printf 'growpart attempt %s of 3\n' "$GROW_ATTEMPT"
+    if GROW_OUTPUT=$(growpart -v "/dev/$DISK" "$PART_NUM" 2>&1); then
+        printf '%s\n' "$GROW_OUTPUT"
+        GROW_STATUS=0
+        break
+    else
+        GROW_STATUS=$?
+    fi
+    printf '%s\n' "$GROW_OUTPUT" >&2
+    case "$GROW_OUTPUT" in
+        *NOCHANGE*) GROW_STATUS=0; break ;;
+    esac
+    [ "$GROW_ATTEMPT" -eq 3 ] || sleep 2
+    GROW_ATTEMPT=$((GROW_ATTEMPT + 1))
+done
+[ "$GROW_STATUS" -eq 0 ] || exit "$GROW_STATUS"
+
+RESIZE_STATUS=1
+RESIZE_ATTEMPT=1
+while [ "$RESIZE_ATTEMPT" -le 3 ]; do
+    printf 'resize2fs attempt %s of 3\n' "$RESIZE_ATTEMPT"
+    if resize2fs "$ROOT_DEV"; then
+        RESIZE_STATUS=0
+        break
+    else
+        RESIZE_STATUS=$?
+    fi
+    [ "$RESIZE_ATTEMPT" -eq 3 ] || sleep 2
+    RESIZE_ATTEMPT=$((RESIZE_ATTEMPT + 1))
+done
+[ "$RESIZE_STATUS" -eq 0 ] || exit "$RESIZE_STATUS"
+
+systemctl disable grow-rootfs.service

@@ -344,6 +344,18 @@ limit. All compilation, assembly, compression and uploading stays on the
 hosted runners; a Mac does not build or relay the artifact. Passing CI proves
 the software checks, not a hardware boot.
 
+## Ubuntu 24.04 on Linux 7.3.0 (11.xx and 13.xx)
+
+`distros/ubuntu2404-k73` is Ubuntu 24.04 LTS on the shared Linux 7.3.0
+kernel build (#5: Image 4's kernel plus the two MediaTek Bluetooth patches),
+for regular PS5 consoles (fat and slim) on firmware 11.xx and 13.xx. PS5 Pro
+is not supported. It carries the Image 4 Wi-Fi, fan, clock and boot-file
+fixes, plus the MediaTek Bluetooth fixes from VivaLaVent's ps5-bazzite-deck
+v1.0.4, including WizGery's bulk OUT fix.
+`.github/workflows/ubuntu2404-k73-image.yml` builds it and makes a
+draft prerelease named `ubuntu2404-k73-image-N`; no image from it has been
+booted on a console yet. See the [profile README](distros/ubuntu2404-k73/README.md).
+
 ## Prerequisites
 
 - Docker with the Buildx plugin (and permission to run `--privileged` containers) — install as per your distro's instructions

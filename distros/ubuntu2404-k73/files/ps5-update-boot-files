@@ -1,0 +1,168 @@
+#!/bin/bash
+# Put the installed linux-ps5 kernel and its initramfs on the PS5 boot
+# partition (/boot/efi) as bzImage and initrd.img.
+#
+# update-initramfs runs this through /etc/initramfs/post-update.d/zz-ps5-boot-files
+# each time it writes /boot/initrd.img-<version> for the linux-ps5 kernel:
+# when linux-ps5 is installed or upgraded, and when another package
+# (linux-firmware, udev, initramfs-tools and so on) asks for a new initramfs.
+# After editing /etc/initramfs-tools or /etc/modprobe.d, run
+#
+#   sudo update-initramfs -u -k 7.3.0
+#
+# and this runs at the end of it. Run it on its own to copy the current files
+# again.
+#
+# Nothing on /boot/efi changes until the initramfs has amdgpu for this kernel,
+# the eight Cyan Skillfish 2 firmware files, ps5-amdgpu.conf and the MediaTek
+# Bluetooth udev rule, none of the Wi-Fi drivers, their firmware, btusb or the
+# frequency drivers, and the kernel and initramfs pass ps5-check-boot-files
+# with cmdline.txt. When bzImage changes, the pair that was on /boot/efi is
+# kept as bzImage.prev and initrd.img.prev; an initramfs rebuild for the same
+# kernel leaves them alone, so they stay the last pair from before the kernel
+# change. If anything fails, /boot/efi is left as it was and the command
+# fails, so apt reports it.
+#
+# --initrd FILE  check and copy this initramfs instead of
+#                /boot/initrd.img-<version> (the hook passes the one
+#                update-initramfs just wrote)
+# --no-backup    do not keep the .prev copies
+# --precheck     only check that /boot/efi is mounted and writable and has
+#                cmdline.txt, and change nothing. The linux-ps5 package runs
+#                this before it unpacks, so dpkg stops before it installs a
+#                kernel that could not be put on /boot/efi.
+set -euo pipefail
+export LC_ALL=C
+
+efi=/boot/efi
+check=/usr/local/sbin/ps5-check-boot-files
+backup=1 precheck=0 renaming=0 initrd=
+cleanup_files=()
+
+cleanup() {
+  ((${#cleanup_files[@]} == 0)) || rm -f -- "${cleanup_files[@]}"
+}
+trap cleanup EXIT
+
+die() {
+  echo "ps5-update-boot-files: $*" >&2
+  if ((precheck)); then
+    echo "ps5-update-boot-files: mount the boot partition read-write at $efi, then run apt or dpkg again" >&2
+  elif ((renaming)); then
+    echo "ps5-update-boot-files: $efi may be partly updated; bzImage.prev and initrd.img.prev are the files that were there" >&2
+  else
+    echo "ps5-update-boot-files: $efi was not changed" >&2
+  fi
+  exit 1
+}
+
+usage() {
+  echo "Usage: $0 [--initrd FILE] [--no-backup] | --precheck" >&2
+  exit 2
+}
+
+while (($#)); do
+  case $1 in
+    --initrd) (($# >= 2)) || usage; initrd=$2; shift 2 ;;
+    --no-backup) backup=0; shift ;;
+    --precheck) precheck=1; shift ;;
+    *) usage ;;
+  esac
+done
+((EUID == 0)) || die "run as root"
+
+mountpoint -q "$efi" || die "$efi is not mounted"
+[[ -w $efi ]] || die "$efi is not writable"
+[[ -f $efi/cmdline.txt ]] || die "$efi/cmdline.txt is missing"
+if ((precheck)); then
+  echo "$efi is mounted and writable"
+  exit 0
+fi
+
+# The kernel version comes from the installed linux-ps5 package.
+mapfile -t kernels < <(dpkg-query -L linux-ps5 2>/dev/null | sed -n 's|^/boot/vmlinuz-||p')
+((${#kernels[@]} == 1)) || die "expected one kernel in the linux-ps5 package, found ${#kernels[@]}"
+kver=${kernels[0]}
+kernel=/boot/vmlinuz-$kver
+[[ -n $initrd ]] || initrd=/boot/initrd.img-$kver
+[[ -f $kernel ]] || die "$kernel is missing"
+[[ -d /usr/lib/modules/$kver ]] || die "/usr/lib/modules/$kver is missing"
+[[ -f $initrd ]] || die "$initrd is missing; run update-initramfs -u -k $kver"
+
+# Left over from an update that was cut off.
+staged=("$efi/bzImage.new" "$efi/initrd.img.new" "$efi/bzImage.prev.new" "$efi/initrd.img.prev.new")
+rm -f -- "${staged[@]}"
+cleanup_files+=("${staged[@]}")
+
+# The same checks the image build makes on its initramfs. lsinitramfs lists
+# the early microcode archive first, so the paths are matched after any
+# leading directory.
+check_initramfs() { # initramfs
+  local contents name missing=()
+  contents=$(lsinitramfs "$1") || die "lsinitramfs cannot read $1"
+  grep -Eq "(^|/)lib/modules/${kver//./\\.}/kernel/drivers/gpu/drm/amd/amdgpu/amdgpu\\.ko(\\.zst)?\$" \
+    <<<"$contents" || missing+=("amdgpu.ko for $kver")
+  for name in ce me mec mec2 pfp rlc sdma sdma1; do
+    grep -Eq "(^|/)lib/firmware/amdgpu/cyan_skillfish2_$name\\.bin\$" <<<"$contents" ||
+      missing+=("cyan_skillfish2_$name.bin")
+  done
+  grep -Eq '(^|/)etc/modprobe\.d/ps5-amdgpu\.conf$' <<<"$contents" || missing+=(ps5-amdgpu.conf)
+  grep -Eq '(^|/)lib/udev/rules\.d/99-ps5-bt-phantom\.rules$' <<<"$contents" ||
+    missing+=(99-ps5-bt-phantom.rules)
+  ((${#missing[@]} == 0)) || die "$1 is missing ${missing[*]}"
+  if grep -Eq '(^|/)((mlan|moal|mt7921e|btusb|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' \
+    <<<"$contents"; then
+    die "$1 has a Wi-Fi driver, its firmware, btusb or a frequency driver"
+  fi
+  echo "$1: amdgpu for $kver, the GPU firmware, ps5-amdgpu.conf and the MediaTek Bluetooth rule, no Wi-Fi, btusb or frequency drivers"
+}
+
+check_initramfs "$initrd"
+"$check" "$kernel" "$initrd" "$efi/cmdline.txt" ||
+  die "these boot files are outside the PS5 loader limits"
+
+# Copy everything before renaming anything, so a failed copy changes nothing.
+changed=()
+for pair in "$initrd:initrd.img" "$kernel:bzImage"; do
+  src=${pair%%:*} name=${pair##*:}
+  if cmp -s -- "$src" "$efi/$name"; then
+    echo "$efi/$name is up to date"
+    continue
+  fi
+  cp -- "$src" "$efi/$name.new" || die "could not write $efi/$name.new"
+  changed+=("$name")
+done
+# Keep the pair that was there, both files, so the .prev files always belong
+# together. Only a new kernel (or a missing .prev) replaces them: after a
+# kernel update, an initramfs rebuild before the next boot must not turn
+# .prev into the new kernel.
+rotate=0
+if ((${#changed[@]} > 0 && backup)) &&
+  { [[ " ${changed[*]} " == *" bzImage "* ]] || [[ ! -f $efi/bzImage.prev ]]; }; then
+  rotate=1
+fi
+if ((rotate)); then
+  for name in bzImage initrd.img; do
+    [[ -f $efi/$name ]] || continue
+    rm -f -- "$efi/$name.prev"
+    cp -- "$efi/$name" "$efi/$name.prev.new" || die "could not write $efi/$name.prev.new"
+  done
+fi
+sync -f "$efi"
+
+renaming=1
+for name in bzImage initrd.img; do
+  [[ ! -f $efi/$name.prev.new ]] || mv -f -- "$efi/$name.prev.new" "$efi/$name.prev" ||
+    die "could not rename $efi/$name.prev.new"
+done
+for name in "${changed[@]}"; do
+  mv -f -- "$efi/$name.new" "$efi/$name" || die "could not rename $efi/$name.new"
+  echo "Updated $efi/$name: $(stat -c %s "$efi/$name") bytes, sha256 $(sha256sum "$efi/$name" | cut -d' ' -f1)"
+done
+sync -f "$efi"
+if ((rotate)) && [[ -f $efi/bzImage.prev ]]; then
+  echo "The previous files are $efi/bzImage.prev and $efi/initrd.img.prev."
+elif ((${#changed[@]} > 0)) && [[ -f $efi/bzImage.prev ]]; then
+  echo "$efi/bzImage.prev and $efi/initrd.img.prev still hold the pair from before the last kernel change."
+fi
+echo "Boot files for $kver are on $efi."
