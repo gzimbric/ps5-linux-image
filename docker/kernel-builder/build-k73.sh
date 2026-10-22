@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds Linux 7.3.0 for the CachyOS 7.3 image for PS5 firmware 11.60.
+# Builds Linux 7.3.0 for the PS5 7.3 images (CachyOS and Ubuntu 24.04).
 #
 # Runs in the ps5-kernel-builder image (Debian gcc 14.2), started by
 # scripts/build-linux-ps5-k73.sh with:
@@ -12,11 +12,16 @@
 #   /src                 an empty Docker volume for the kernel tree
 #   /out                 output directory
 #
-# The patch set is the 7.3 port by rmux (Armandas Kvietkus) in
-# rmuxnet/ps5-linux-patches-1. A byte-for-byte, hash-pinned follow-up from the
-# ps5-bazzite-deck v1.0.3 release makes the IW620 Bluetooth quirks in that port
-# take effect. The config changes made here build the two PS5 frequency
-# drivers and Linux 7.3's in-tree MT7921 PCI Wi-Fi driver as modules.
+# The patch set is the 7.3 port by rmux in rmuxnet/ps5-linux-patches-1.
+# Three byte-for-byte, hash-pinned follow-ups from VivaLaVent's
+# ps5-bazzite-deck releases go on top: the v1.0.3 btusb patch makes the IW620
+# Bluetooth quirks in that port take effect, and two v1.0.4 patches fix the
+# MediaTek Bluetooth (USB 0e8d:3603) found with MT7921 Wi-Fi: WizGery's bulk
+# OUT endpoint fix from ps5-mediatek-fixes, ported to 7.3, and an L2CAP change
+# that answers "pending" instead of refusing a connection request that
+# arrives before the encryption change event. The config changes made here
+# build the two PS5 frequency drivers and Linux 7.3's in-tree MT7921 PCI
+# Wi-Fi driver as modules.
 set -euo pipefail
 
 LINUX_COMMIT=c03c1a14507dfaf8b856c2608f9ac216021fc222   # tag v7.3
@@ -25,6 +30,10 @@ KVER=7.3.0
 PATCH_SHA256=b8a238b9973febbcf851053d99195bd7320bb0827c8ee5e4c54eba6b6f7cde3f
 BTUSB_PATCH=/repo/distros/cachyos1160-k73/kernel/ps5-btusb-iw620-quirks.patch
 BTUSB_PATCH_SHA256=c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8
+MTK_BULK_OUT_PATCH=/repo/distros/cachyos1160-k73/kernel/ps5-mt7921-btusb-bulk-out.patch
+MTK_BULK_OUT_PATCH_SHA256=dd6f2f00e4f6bd64ba209d84537234119b1527bd39ef0461f11d0ecba7bbe899
+MTK_L2CAP_PATCH=/repo/distros/cachyos1160-k73/kernel/ps5-mt7921-l2cap-defer-security.patch
+MTK_L2CAP_PATCH_SHA256=69f1c17747dfd2f7b1ec5532e259d2d937d9ad0f1940e239caf863db28ddb6c2
 CONFIG_SHA256=2294e750518bbfedf9741f5638d81f6308a2fa3839b2e005f5e071224622533d
 VCN_SHA256=bbd15ab65e76178c2918e8224b6ab4ab1711f1b59d935ee131ab188a9712e596
 VCN_SIZE=404544
@@ -35,7 +44,7 @@ CHECK=/repo/distros/cachyos1160-k73/files/ps5-1160-check-boot-files
 export KBUILD_BUILD_USER=ps5
 export KBUILD_BUILD_HOST=ps5-linux-image
 export KBUILD_BUILD_TIMESTAMP='Sun Oct 18 16:00:53 UTC 2026'
-export KBUILD_BUILD_VERSION=4
+export KBUILD_BUILD_VERSION=5
 export TZ=UTC
 export LC_ALL=C
 export CCACHE_DISABLE=1
@@ -65,6 +74,8 @@ echo "$(uname -m) host, $(x86_64-linux-gnu-gcc --version | head -1), $JOBS jobs"
 step "Sources"
 expect_sha256 /ps5-linux-patches/linux.patch "$PATCH_SHA256"
 expect_sha256 "$BTUSB_PATCH" "$BTUSB_PATCH_SHA256"
+expect_sha256 "$MTK_BULK_OUT_PATCH" "$MTK_BULK_OUT_PATCH_SHA256"
+expect_sha256 "$MTK_L2CAP_PATCH" "$MTK_L2CAP_PATCH_SHA256"
 expect_sha256 /ps5-linux-patches/.config "$CONFIG_SHA256"
 expect_sha256 /ps5-linux-patches/firmware/amdgpu/ps5_vcn.bin "$VCN_SHA256"
 test "$(stat -c %s /ps5-linux-patches/firmware/amdgpu/ps5_vcn.bin)" = "$VCN_SIZE"
@@ -103,6 +114,45 @@ quirks_lookup_line=$(grep -n 'match = usb_match_id(intf, quirks_table);' "$btusb
 ifnum0_line=$(grep -n 'if ((id->driver_info & BTUSB_IFNUM_0)' "$btusb" | cut -d: -f1)
 test "$ifnum0_line" -gt "$quirks_lookup_line" ||
   die "btusb BTUSB_IFNUM_0 check still runs before the quirks lookup"
+
+# MediaTek Bluetooth (0e8d:3603). The l2cap patch was made against an older
+# l2cap_core.c and applies 15 lines further down; git apply takes the offset
+# but no fuzz. Check where both changes landed.
+for patch in "$MTK_BULK_OUT_PATCH" "$MTK_L2CAP_PATCH"; do
+  git apply --check "$patch"
+  git apply "$patch"
+  echo "applied ${patch##*/} ($(grep -c '^--- a/' "$patch") files)"
+done
+count_is() { # file fixed-string expected-count
+  test "$(grep -cF -- "$2" "$1")" = "$3" ||
+    die "$1: expected $3 line(s) with '$2', found $(grep -cF -- "$2" "$1")"
+}
+line_of() { # file fixed-string
+  grep -nF -- "$2" "$1" | cut -d: -f1
+}
+count_is "$btusb" 'static int ps5_tx_ep = 0x02;' 1
+count_is "$btusb" 'module_param(ps5_tx_ep, int, 0644);' 1
+count_is "$btusb" 'idProduct) == 0x3603 && ps5_tx_ep) {' 1
+count_is "$btusb" 'static int btusb_probe(struct usb_interface *intf,' 1
+count_is "$btusb" 'err = usb_find_common_endpoints(intf->cur_altsetting, &data->bulk_rx_ep,' 1
+probe_line=$(line_of "$btusb" 'static int btusb_probe(struct usb_interface *intf,')
+endpoints_line=$(line_of "$btusb" 'err = usb_find_common_endpoints(intf->cur_altsetting, &data->bulk_rx_ep,')
+mtk_tx_line=$(line_of "$btusb" 'idProduct) == 0x3603 && ps5_tx_ep) {')
+amp_line=$(awk -v start="$mtk_tx_line" \
+  'NR > start && index($0, "if (id->driver_info & BTUSB_AMP) {") { print NR; exit }' "$btusb")
+test -n "$amp_line" && test "$probe_line" -lt "$endpoints_line" &&
+  test "$endpoints_line" -lt "$mtk_tx_line" && test "$mtk_tx_line" -lt "$amp_line" ||
+  die "btusb: the 0e8d:3603 bulk OUT override is not right after the endpoint lookup in btusb_probe"
+l2cap=net/bluetooth/l2cap_core.c
+count_is "$l2cap" 'encryption pending, deferring psm' 1
+count_is "$l2cap" 'static void l2cap_connect(struct l2cap_conn *conn, struct l2cap_cmd_hdr *cmd,' 1
+count_is "$l2cap" 'static int l2cap_connect_req(struct l2cap_conn *conn,' 1
+connect_line=$(line_of "$l2cap" 'static void l2cap_connect(struct l2cap_conn *conn, struct l2cap_cmd_hdr *cmd,')
+defer_line=$(line_of "$l2cap" 'encryption pending, deferring psm')
+connect_req_line=$(line_of "$l2cap" 'static int l2cap_connect_req(struct l2cap_conn *conn,')
+test "$connect_line" -lt "$defer_line" && test "$defer_line" -lt "$connect_req_line" ||
+  die "l2cap: the encryption-pending branch is not in l2cap_connect()"
+echo "ok  btusb 0e8d:3603 bulk OUT override in btusb_probe, l2cap deferral in l2cap_connect"
 
 step "Config"
 cp /ps5-linux-patches/.config .config
@@ -151,6 +201,12 @@ for module in drivers/cpufreq/ps5-cpufreq.ko drivers/devfreq/ps5-gpufreq.ko; do
   test -f "$module" || die "$module was not built"
   [ -z "$(modinfo -F alias "$module")" ] || die "$module has a module alias"
 done
+modinfo -F parm drivers/bluetooth/btusb.ko |
+  grep -qxF 'ps5_tx_ep:PS5 MediaTek BT: bulk OUT endpoint for ACL (0 = default) (int)' ||
+  die "btusb.ko does not have the ps5_tx_ep parameter"
+# CONFIG_DYNAMIC_DEBUG keeps BT_DBG format strings in the module.
+grep -qaF 'encryption pending, deferring psm' net/bluetooth/bluetooth.ko ||
+  die "bluetooth.ko does not have the l2cap encryption-pending change"
 mt7921e=drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko
 test -f "$mt7921e" || die "$mt7921e was not built"
 mt_vermagic=$(modinfo -F vermagic "$mt7921e")
@@ -230,6 +286,8 @@ for module in kernel/drivers/cpufreq/ps5-cpufreq.ko \
   kernel/drivers/net/wireless/mediatek/mt76/mt792x-lib.ko \
   kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921-common.ko \
   kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko \
+  kernel/drivers/bluetooth/btusb.ko \
+  kernel/net/bluetooth/bluetooth.ko \
   kernel/net/wireless/cfg80211.ko; do
   test -f "$modules/$module" || die "$module is missing from the staged modules"
 done
@@ -245,7 +303,7 @@ cp /tmp/config.diff /out/kernel/config-changes.diff
 cp /ps5-linux-patches/firmware/LICENSE.amdgpu /out/kernel/LICENSE.amdgpu
 cp System.map Module.symvers /out/kernel/
 {
-  echo "Linux $KVER for the CachyOS 7.3 image, PS5 firmware 11.60"
+  echo "Linux $KVER for the PS5 7.3 images (CachyOS and Ubuntu 24.04)"
   echo "Kernel:       v7.3, commit $LINUX_COMMIT"
   echo "Patch set:    rmuxnet/ps5-linux-patches-1, commit $PATCHES_COMMIT"
   echo "              linux.patch sha256 $PATCH_SHA256"
@@ -253,6 +311,9 @@ cp System.map Module.symvers /out/kernel/
   echo "              firmware/amdgpu/ps5_vcn.bin $VCN_SIZE bytes, sha256 $VCN_SHA256 (built in)"
   echo "Bluetooth:    ps5-bazzite-deck v1.0.3 release asset ps5-btusb-quirks-fix.patch"
   echo "              vendored as ps5-btusb-iw620-quirks.patch sha256 $BTUSB_PATCH_SHA256"
+  echo "              ps5-bazzite-deck v1.0.4 MediaTek Bluetooth (0e8d:3603) patches"
+  echo "              ps5-mt7921-btusb-bulk-out.patch sha256 $MTK_BULK_OUT_PATCH_SHA256"
+  echo "              ps5-mt7921-l2cap-defer-security.patch sha256 $MTK_L2CAP_PATCH_SHA256"
   echo "Config:       X86_PS5_CPUFREQ=m PS5_GPUFREQ=m MT7921E=m, then olddefconfig; sha256 $(sha256sum .config | awk '{print $1}')"
   echo "Compiler:     $(x86_64-linux-gnu-gcc --version | head -1), $(uname -m) build host"
   echo "Version:      $(strings arch/x86/boot/bzImage | awk -v k="$KVER (" 'index($0, k) == 1 && !n { print; n = 1 }')"

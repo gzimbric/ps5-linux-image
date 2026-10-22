@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Build the Linux 7.3.0 kernel and the IW620 Wi-Fi modules for the CachyOS
-# 7.3 image for PS5 firmware 11.60.
+# Build the Linux 7.3.0 kernel and the IW620 Wi-Fi modules for the PS5 7.3
+# images (CachyOS and Ubuntu 24.04).
 #
 # Fetches every source at a pinned commit, builds the kernel in the Debian
 # gcc 14.2 kernel-builder image (docker/kernel-builder/build-k73.sh), then
 # builds mlan.ko and moal.ko against the same tree without network access
 # (docker/kernel-builder/build-iw620-k73.sh). scripts/package-linux-ps5-k73.sh
-# then turns the result into the linux-ps5 pacman package.
+# then turns the result into the linux-ps5 pacman package, and
+# scripts/package-linux-ps5-k73-deb.sh turns that package into the .deb for
+# the Ubuntu image.
 #
 # The kernel patch set is the 7.3 port with the PS5 CPU and GPU frequency
-# drivers by rmux (Armandas Kvietkus), rmuxnet/ps5-linux-patches-1, fetched at
-# the pinned commit. The builder then applies the exact, hash-pinned IW620
-# Bluetooth source patch published with ps5-bazzite-deck v1.0.3.
+# drivers by rmux, rmuxnet/ps5-linux-patches-1, fetched at the pinned commit.
+# The builder then applies the exact, hash-pinned Bluetooth source patches
+# published with VivaLaVent's ps5-bazzite-deck v1.0.3 (IW620) and v1.0.4
+# (MediaTek).
 #
 # Needs git and Docker. Runs on Linux or macOS; GitHub Actions uses an x86_64
 # runner and the linux/amd64 builder.
