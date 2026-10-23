@@ -95,7 +95,7 @@ scrub() {
     ip -brief link 2>&1 || true
     ip -brief address 2>&1 || true
     ip route 2>&1 || true
-    nmcli --terse --fields DEVICE,TYPE,STATE device status 2>&1 || true
+    timeout 5 nmcli --terse --fields DEVICE,TYPE,STATE device status 2>&1 || true
 
     echo
     echo "[wifi]"
@@ -180,14 +180,16 @@ scrub() {
         /etc/bluetooth/main.conf 2>&1 || true
     echo 'BlueZ HID policy:'
     grep -E '^UserspaceHID=' /etc/bluetooth/input.conf 2>&1 || true
-    bluetoothctl list 2>&1 || true
-    bluetoothctl show 2>&1 || true
-    bluetoothctl devices 2>&1 || true
-    bluetoothctl devices Paired 2>&1 || true
-    bluetoothctl devices Connected 2>&1 || true
+    # The Bluetooth tools wait forever when a controller stops answering, as
+    # the PS5 Pro's does after its firmware setup fails. Bound each call.
+    timeout 3 bluetoothctl list 2>&1 || true
+    timeout 3 bluetoothctl show 2>&1 || true
+    timeout 3 bluetoothctl devices 2>&1 || true
+    timeout 3 bluetoothctl devices Paired 2>&1 || true
+    timeout 3 bluetoothctl devices Connected 2>&1 || true
     grep -Ei -A8 'DualSense|Wireless Controller' /proc/bus/input/devices 2>&1 || true
     if command -v btmgmt >/dev/null 2>&1; then
-        btmgmt info 2>&1 || true
+        timeout 5 btmgmt info 2>&1 || true
     fi
     rfkill list bluetooth 2>&1 || true
     for controller in /sys/class/bluetooth/hci*; do
@@ -243,7 +245,7 @@ scrub() {
 
     echo
     echo "[temperatures]"
-    sensors 2>&1 || true
+    timeout 10 sensors 2>&1 || true
 
     # This profile loads the frequency drivers after the fan target is applied
     # unless the FAT opt-out is present. Record the policy and resulting
