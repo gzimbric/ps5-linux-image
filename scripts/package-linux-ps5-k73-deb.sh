@@ -34,9 +34,9 @@ umask 022
 
 KVER=7.3.0
 PKGNAME=linux-ps5
-# 7.3.0-4 was the CachyOS Image 4 kernel; -5 adds the MediaTek Bluetooth
-# patches (KBUILD_BUILD_VERSION 5 in docker/kernel-builder/build-k73.sh).
-DEB_VERSION=${KVER}-5
+# 7.3.0-5 added the MediaTek Bluetooth patches. -6 adds the Pro amdgpu
+# follow-up and MT7925 verification (KBUILD_BUILD_VERSION 6).
+DEB_VERSION=${KVER}-6
 # Commit time of the pinned patch set (36f173f), as in the pacman package.
 SOURCE_DATE_EPOCH=1792339253
 export SOURCE_DATE_EPOCH
@@ -98,6 +98,8 @@ for f in "boot/vmlinuz-$KVER" "boot/System.map-$KVER" "boot/config-$KVER" \
   "usr/lib/modules/$KVER/build/Makefile" \
   "usr/lib/modules/$KVER/kernel/drivers/gpu/drm/amd/amdgpu/amdgpu.ko" \
   "usr/lib/modules/$KVER/kernel/drivers/bluetooth/btusb.ko" \
+  "usr/lib/modules/$KVER/kernel/drivers/bluetooth/btmtk.ko" \
+  "usr/lib/modules/$KVER/kernel/drivers/net/wireless/mediatek/mt76/mt7925/mt7925e.ko" \
   "usr/share/licenses/$PKGNAME/LICENSE.amdgpu"; do
   [[ -f $src/$f ]] || die "$f is missing from ${package##*/}"
 done
@@ -172,13 +174,13 @@ Provides: linux-image-$KVER, linux-modules-$KVER, linux-headers-$KVER
 Section: kernel
 Priority: optional
 Homepage: https://github.com/gzimbric/ps5-linux-image
-Description: Linux $KVER for the PS5 (kernel, modules and module build tree)
+Description: Linux $KVER for the PS5 and PS5 Pro (kernel, modules and build tree)
  Linux v7.3 with rmux's PS5 patch set (rmuxnet/ps5-linux-patches-1) and the
- PS5 Bluetooth patches from VivaLaVent's ps5-bazzite-deck, made from the
- same kernel build as the CachyOS 7.3 image, plus the IW620 Wi-Fi modules
- (mlan, moal) built against it. On the PS5 Ubuntu image, installing it
- updates bzImage and initrd.img on the boot partition through the image's
- initramfs-tools hook.
+ PS5 Pro GPU delta, plus the PS5 Bluetooth patches from VivaLaVent's
+ ps5-bazzite-deck. It also includes the in-tree MT7925 driver and the IW620
+ Wi-Fi modules (mlan, moal) built against the same kernel. On the PS5 Ubuntu
+ image, installing it updates bzImage and initrd.img on the boot partition
+ through the image's initramfs-tools hook.
 EOF
 chmod 0644 "$root/DEBIAN/control"
 find "$root" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
@@ -194,6 +196,8 @@ listing=$(dpkg-deb --fsys-tarfile "$deb" | tar -t)
 for f in "./boot/vmlinuz-$KVER" "./usr/lib/modules/$KVER/modules.order" \
   "./usr/lib/modules/$KVER/build/Makefile" \
   "./usr/lib/modules/$KVER/kernel/drivers/bluetooth/btusb.ko" \
+  "./usr/lib/modules/$KVER/kernel/drivers/bluetooth/btmtk.ko" \
+  "./usr/lib/modules/$KVER/kernel/drivers/net/wireless/mediatek/mt76/mt7925/mt7925e.ko" \
   "./usr/lib/modules/$KVER/updates/ps5-iw620/mlan.ko" \
   "./usr/lib/modules/$KVER/updates/ps5-iw620/moal.ko" \
   "./usr/share/doc/$PKGNAME/LICENSE.amdgpu"; do

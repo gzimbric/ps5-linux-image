@@ -21,7 +21,7 @@ shopt -s inherit_errexit
 export LC_ALL=C
 
 KVER=7.3.0
-DEB_VERSION=7.3.0-5
+DEB_VERSION=7.3.0-6
 ROOT_LABEL=ubuntu2404-k73
 P2_START=2048 P2_SECTORS=1021952 P1_START=1024000
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
@@ -36,11 +36,36 @@ MT7921E_ALIASES=(
   'pci:v000014C3d00007920sv*sd*bc*sc*i*'
   'pci:v000014C3d00007902sv*sd*bc*sc*i*'
 )
-# The PS5's MT7921 (PCI 14c3:7961) and its Bluetooth (USB 0e8d:3603).
+MT7925E_MODULE=kernel/drivers/net/wireless/mediatek/mt76/mt7925/mt7925e.ko
+MT7925E_ALIASES=(
+  'pci:v000014C3d00007925sv*sd*bc*sc*i*'
+  'pci:v000014C3d00000717sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007927sv*sd*bc*sc*i*'
+  'pci:v000014C3d00006639sv*sd*bc*sc*i*'
+  'pci:v000014C3d00000738sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007928sv*sd*bc*sc*i*'
+  'pci:v000014C3d00007935sv*sd*bc*sc*i*'
+)
+MT7925E_DECLARED_FIRMWARE=(
+  mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.bin
+  mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin
+  mediatek/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin
+  mediatek/mt7927/WIFI_MT6639_PATCH_MCU_2_1_hdr.bin
+  mediatek/mt7928/WIFI_RAM_CODE_MT7935_1_1.bin
+  mediatek/mt7928/WIFI_MT7935_PATCH_MCU_1_1_hdr.bin
+  mediatek/mt7928/CBMCU_CODE_MT7935_1_1.bin
+  mediatek/mt7928/WIFI_MT7935_PHY_RAM_CODE_1_1.bin
+)
+# The regular PS5's MT7921 (PCI 14c3:7961), the Pro's MT7925, and Bluetooth.
 MEDIATEK_FIRMWARE=(
   mediatek/WIFI_MT7961_patch_mcu_1_2_hdr.bin
   mediatek/WIFI_RAM_CODE_MT7961_1.bin
   mediatek/BT_RAM_CODE_MT7961_1_2_hdr.bin
+)
+MT7925_FIRMWARE=(
+  'mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.bin 19c34a936a87f5ee0ea5c7b059c9f440d73cef6891ca8211f080356c1c058ea6'
+  'mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin f480faff1abe4bbccfd6fa91343338db148e7763cef257a9b8ca66ba367d3457'
+  'mediatek/mt7925/BT_RAM_CODE_MT7925_1_1_hdr.bin 0d79a71c305eec82fdbf1fe1dc15110ef53aec43eee52a6ec3c28bb2b5b0d2f9'
 )
 GPU_FIRMWARE=(
   'ce 5946efbf7e46ccfe7e9f965da56c35b1187469d1c1a49c8a9eff433eb3ab4723'
@@ -260,7 +285,7 @@ grep -qx 'CONFIG_RD_ZSTD=y' "$R/boot/config-$KVER" || die "the kernel cannot unp
 contents=$(in_root lsinitramfs "/boot/initrd.img-$KVER")
 grep -Eq "(^|/)lib/modules/$KVER/kernel/drivers/gpu/drm/amd/amdgpu/amdgpu\\.ko(\\.zst)?\$" <<<"$contents" ||
   die "the initramfs has no amdgpu.ko for $KVER"
-if grep -E '(^|/)((mlan|moal|mt7921e|btusb|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' <<<"$contents"; then
+if grep -E '(^|/)((mlan|moal|mt7921e|mt7925e|btusb|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' <<<"$contents"; then
   die "the initramfs has a Wi-Fi driver, its firmware, btusb or a frequency driver"
 fi
 in_root unmkinitramfs "/boot/initrd.img-$KVER" /tmp/initramfs
@@ -308,13 +333,50 @@ for firmware in "${MEDIATEK_FIRMWARE[@]}"; do
   [[ -f $R/usr/lib/firmware/$firmware || -f $R/usr/lib/firmware/$firmware.zst ]] ||
     die "MediaTek firmware is missing: /usr/lib/firmware/${firmware}[.zst]"
 done
-mt_blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(mt7921e|btusb)([[:space:]]|$)' \
+for entry in "${MT7925_FIRMWARE[@]}"; do
+  read -r firmware expected <<<"$entry"
+  [[ -f $R/usr/lib/firmware/$firmware ]] ||
+    die "MT7925 firmware is missing: /usr/lib/firmware/$firmware"
+  [[ $(sha "$R/usr/lib/firmware/$firmware") == "$expected" ]] ||
+    die "MT7925 firmware does not match the pinned payload: $firmware"
+done
+
+mt7925e=$m/$MT7925E_MODULE
+[[ -f $mt7925e ]] || die "$MT7925E_MODULE is not installed"
+grep -q "^$MT7925E_MODULE:" "$m/modules.dep" || die "mt7925e.ko is not in modules.dep"
+mt7925_filename=$(in_root modinfo -k "$KVER" -F filename mt7925e)
+mt7925_filename=/usr${mt7925_filename#/usr}
+[[ $mt7925_filename == "/usr/lib/modules/$KVER/$MT7925E_MODULE" ]] ||
+  die "modprobe resolves mt7925e to $mt7925_filename"
+[[ $(in_root modinfo -k "$KVER" -F vermagic mt7925e) == "$cfg80211_vermagic" ]] ||
+  die "mt7925e vermagic does not match cfg80211"
+mt7925_deps=$(in_root modinfo -k "$KVER" -F depends mt7925e | tr ',' '\n' | sort | tr '\n' ' ')
+[[ $mt7925_deps == 'mt76 mt76-connac-lib mt7925-common mt792x-lib ' ]] ||
+  die "unexpected mt7925e dependencies: $mt7925_deps"
+actual=$(in_root modinfo -k "$KVER" -F alias mt7925e | sort)
+expected=$(printf '%s\n' "${MT7925E_ALIASES[@]}" | sort)
+[[ $actual == "$expected" ]] || die "unexpected mt7925e PCI aliases"
+for alias in "${MT7925E_ALIASES[@]}"; do
+  grep -qxF "alias $alias mt7925e" "$m/modules.alias" ||
+    die "modules.alias has no mt7925e entry for $alias"
+done
+in_root modinfo -k "$KVER" -F parm mt7925e |
+  grep -qxF 'disable_aspm:disable PCI ASPM support (bool)' ||
+  die "mt7925e has no disable_aspm parameter"
+actual=$(in_root modinfo -k "$KVER" -F firmware mt7925e | sort)
+expected=$(printf '%s\n' "${MT7925E_DECLARED_FIRMWARE[@]}" | sort)
+[[ $actual == "$expected" ]] || die "unexpected mt7925e firmware declarations"
+in_root modinfo -k "$KVER" -F firmware btmtk |
+  grep -qxF 'mediatek/mt7925/BT_RAM_CODE_MT7925_1_1_hdr.bin' ||
+  die "btmtk does not declare the MT7925 Bluetooth firmware"
+
+mt_blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(mt7921e|mt7925e|btusb)([[:space:]]|$)' \
   "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d" || true)
-[[ -z $mt_blocks ]] || die "mt7921e or btusb is blocked: $mt_blocks"
-mt_loads=$(grep -Rslw -- mt7921e "$R/etc/modules-load.d" "$R/usr/lib/modules-load.d" \
+[[ -z $mt_blocks ]] || die "mt7921e, mt7925e or btusb is blocked: $mt_blocks"
+mt_loads=$(grep -Rslw -e mt7921e -e mt7925e "$R/etc/modules-load.d" "$R/usr/lib/modules-load.d" \
   2>/dev/null || true)
-[[ -z $mt_loads ]] || die "mt7921e is force-loaded by: ${mt_loads//$'\n'/ }"
-ok "mt7921e in-tree, selected only by its PCI aliases, disable_aspm=1, PS5 MediaTek firmware present"
+[[ -z $mt_loads ]] || die "a MediaTek Wi-Fi driver is force-loaded by: ${mt_loads//$'\n'/ }"
+ok "mt7921e and mt7925e in-tree, selected only by PCI aliases; PS5 MediaTek firmware present"
 
 for module in mlan moal; do
   f=$m/updates/ps5-iw620/$module.ko
@@ -403,6 +465,11 @@ for module in ps5-cpufreq ps5-gpufreq; do
   fi
 done
 same "$R/usr/local/sbin/ps5-performance" "$F/ps5-performance" "/usr/local/sbin/ps5-performance"
+grep -qF '0x13da|0x13dc)' "$R/usr/local/sbin/ps5-performance" ||
+  die "ps5-performance does not skip both PS5 Pro GPU IDs"
+pro_guard_line=$(grep -nF '0x13da|0x13dc)' "$R/usr/local/sbin/ps5-performance" | cut -d: -f1)
+first_freq_load=$(grep -nE 'modprobe ps5_(gpu|cpu)freq' "$R/usr/local/sbin/ps5-performance" | head -1 | cut -d: -f1)
+((pro_guard_line < first_freq_load)) || die "ps5-performance checks for PS5 Pro after loading a frequency driver"
 ok "ps5-cpufreq and ps5-gpufreq installed, loaded only by ps5-performance"
 
 # ---------------------------------------------------------------- services

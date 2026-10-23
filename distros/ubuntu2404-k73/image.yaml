@@ -1,5 +1,6 @@
-# Ubuntu 24.04 LTS on Linux 7.3.0 for regular PS5 consoles (firmware 11.xx
-# and 13.xx). Built by scripts/build-ubuntu2404-k73-image.sh through
+# Ubuntu 24.04 LTS on Linux 7.3.0 for regular PS5 consoles and experimental
+# PS5 Pro bring-up (firmware 11.xx and 13.xx). Built by
+# scripts/build-ubuntu2404-k73-image.sh through
 # docker/image-builder/entrypoint.sh with DISTRO=ubuntu2404-k73. The package
 # set and apt setup are the ones distros/ubuntu2404 uses; everything
 # PS5-specific happens in setup-rootfs.sh (the post-files action below).

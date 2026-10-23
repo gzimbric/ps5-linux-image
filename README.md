@@ -347,14 +347,15 @@ the software checks, not a hardware boot.
 ## Ubuntu 24.04 on Linux 7.3.0 (11.xx and 13.xx)
 
 `distros/ubuntu2404-k73` is Ubuntu 24.04 LTS on the shared Linux 7.3.0
-kernel build (#5: Image 4's kernel plus the two MediaTek Bluetooth patches),
-for regular PS5 consoles (fat and slim) on firmware 11.xx and 13.xx. PS5 Pro
-is not supported. It carries the Image 4 Wi-Fi, fan, clock and boot-file
-fixes, plus the MediaTek Bluetooth fixes from VivaLaVent's ps5-bazzite-deck
-v1.0.4, including WizGery's bulk OUT fix.
+kernel build #6 for regular PS5 consoles (fat and slim), plus an experimental
+PS5 Pro path, on firmware 11.xx and 13.xx. It carries the Image 4 Wi-Fi, fan,
+clock and boot-file fixes, the MediaTek Bluetooth fixes from VivaLaVent's
+ps5-bazzite-deck v1.0.4, and the Pro-only GPU delta ported onto the pinned 7.3
+patch set. The same image includes the in-tree MT7925 driver and pinned Pro
+Wi-Fi/Bluetooth firmware; regular-only frequency modules are skipped on Pro.
 `.github/workflows/ubuntu2404-k73-image.yml` builds it and makes a
 draft prerelease named `ubuntu2404-k73-image-N`; no image from it has been
-booted on a console yet. See the [profile README](distros/ubuntu2404-k73/README.md).
+booted on Pro yet. See the [profile README](distros/ubuntu2404-k73/README.md).
 
 ## Prerequisites
 

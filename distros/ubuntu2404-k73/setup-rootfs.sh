@@ -21,9 +21,10 @@ export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 KVER=7.3.0
-DEB_VERSION=7.3.0-5
+DEB_VERSION=7.3.0-6
 B=/opt/ps5-bootstrap
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
+MT7925E_MODULE=kernel/drivers/net/wireless/mediatek/mt76/mt7925/mt7925e.ko
 
 fail() {
     echo "ERROR: $*" >&2
@@ -192,6 +193,32 @@ sdma 15d0d3626da7f2513f03b13bb7e02eeeeccab276276ae27d0b6067b5f25e9e95
 sdma1 bd1c0b0f6a6a4f17ede034f2c844b6553fc444e08915c7bb500c09fde59d6255
 EOF
 
+# Ubuntu 24.04's linux-firmware package can lag the in-tree MT7925 driver.
+# Install the three PS5 Pro Wi-Fi/Bluetooth payloads from the same pinned
+# linux-firmware revision as the GPU files and verify every byte.
+while read -r relative expected; do
+    raw="/usr/lib/firmware/$relative"
+    compressed="${raw}.zst"
+    candidate=$(mktemp)
+    if [ -e "$raw" ]; then
+        cp -L "$raw" "$candidate"
+    elif [ -e "$compressed" ]; then
+        zstd -q -f -d -c "$compressed" > "$candidate"
+    fi
+    if [ "$(sha "$candidate")" != "$expected" ]; then
+        curl -fsSL \
+            "https://gitlab.com/kernel-firmware/linux-firmware/-/raw/$firmware_ref/$relative" \
+            -o "$candidate"
+    fi
+    test "$(sha "$candidate")" = "$expected"
+    install -D -m 0644 "$candidate" "$raw"
+    rm -f "$candidate"
+done <<'EOF'
+mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.bin 19c34a936a87f5ee0ea5c7b059c9f440d73cef6891ca8211f080356c1c058ea6
+mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin f480faff1abe4bbccfd6fa91343338db148e7763cef257a9b8ca66ba367d3457
+mediatek/mt7925/BT_RAM_CODE_MT7925_1_1_hdr.bin 0d79a71c305eec82fdbf1fe1dc15110ef53aec43eee52a6ec3c28bb2b5b0d2f9
+EOF
+
 # ------------------------------------------------------------------ kernel
 
 if find /usr/lib/modules -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
@@ -271,6 +298,46 @@ grep -qxF "alias $IW620_ALIAS moal" "/usr/lib/modules/$KVER/modules.alias"
 modinfo -k "$KVER" -F parm btusb |
     grep -qxF 'ps5_tx_ep:PS5 MediaTek BT: bulk OUT endpoint for ACL (0 = default) (int)' ||
     fail "btusb does not have the MediaTek bulk OUT fix"
+
+[ "$(module_file mt7925e)" = "/usr/lib/modules/$KVER/$MT7925E_MODULE" ] ||
+    fail "modprobe would not load the in-tree $MT7925E_MODULE"
+[ "$(modinfo -k "$KVER" -F vermagic mt7925e)" = "$cfg80211_vermagic" ] ||
+    fail "mt7925e vermagic does not match cfg80211"
+mt7925_aliases=(
+    'pci:v000014C3d00007925sv*sd*bc*sc*i*'
+    'pci:v000014C3d00000717sv*sd*bc*sc*i*'
+    'pci:v000014C3d00007927sv*sd*bc*sc*i*'
+    'pci:v000014C3d00006639sv*sd*bc*sc*i*'
+    'pci:v000014C3d00000738sv*sd*bc*sc*i*'
+    'pci:v000014C3d00007928sv*sd*bc*sc*i*'
+    'pci:v000014C3d00007935sv*sd*bc*sc*i*'
+)
+actual=$(modinfo -k "$KVER" -F alias mt7925e | sort)
+expected=$(printf '%s\n' "${mt7925_aliases[@]}" | sort)
+[ "$actual" = "$expected" ] || fail "unexpected mt7925e PCI aliases"
+for alias in "${mt7925_aliases[@]}"; do
+    grep -qxF "alias $alias mt7925e" "/usr/lib/modules/$KVER/modules.alias" ||
+        fail "modules.alias has no mt7925e entry for $alias"
+done
+modinfo -k "$KVER" -F parm mt7925e |
+    grep -qxF 'disable_aspm:disable PCI ASPM support (bool)' ||
+    fail "mt7925e has no disable_aspm parameter"
+mt7925_firmware=(
+    mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.bin
+    mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin
+    mediatek/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin
+    mediatek/mt7927/WIFI_MT6639_PATCH_MCU_2_1_hdr.bin
+    mediatek/mt7928/WIFI_RAM_CODE_MT7935_1_1.bin
+    mediatek/mt7928/WIFI_MT7935_PATCH_MCU_1_1_hdr.bin
+    mediatek/mt7928/CBMCU_CODE_MT7935_1_1.bin
+    mediatek/mt7928/WIFI_MT7935_PHY_RAM_CODE_1_1.bin
+)
+actual=$(modinfo -k "$KVER" -F firmware mt7925e | sort)
+expected=$(printf '%s\n' "${mt7925_firmware[@]}" | sort)
+[ "$actual" = "$expected" ] || fail "unexpected mt7925e firmware declarations"
+modinfo -k "$KVER" -F firmware btmtk |
+    grep -qxF 'mediatek/mt7925/BT_RAM_CODE_MT7925_1_1_hdr.bin' ||
+    fail "btmtk does not declare the MT7925 Bluetooth firmware"
 # The PS5's MT7921 Wi-Fi (PCI 14c3:7961) and its Bluetooth (USB 0e8d:3603)
 # firmware, from Ubuntu's linux-firmware.
 for firmware in mediatek/WIFI_MT7961_patch_mcu_1_2_hdr.bin \
@@ -279,6 +346,16 @@ for firmware in mediatek/WIFI_MT7961_patch_mcu_1_2_hdr.bin \
     [ -e "/usr/lib/firmware/$firmware" ] || [ -e "/usr/lib/firmware/$firmware.zst" ] ||
         fail "MediaTek firmware is missing: /usr/lib/firmware/$firmware"
 done
+while read -r firmware expected; do
+    [ -f "/usr/lib/firmware/$firmware" ] ||
+        fail "MT7925 firmware is missing: /usr/lib/firmware/$firmware"
+    [ "$(sha "/usr/lib/firmware/$firmware")" = "$expected" ] ||
+        fail "MT7925 firmware does not match the pinned payload: $firmware"
+done <<'EOF'
+mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.bin 19c34a936a87f5ee0ea5c7b059c9f440d73cef6891ca8211f080356c1c058ea6
+mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin f480faff1abe4bbccfd6fa91343338db148e7763cef257a9b8ca66ba367d3457
+mediatek/mt7925/BT_RAM_CODE_MT7925_1_1_hdr.bin 0d79a71c305eec82fdbf1fe1dc15110ef53aec43eee52a6ec3c28bb2b5b0d2f9
+EOF
 
 # ---------------------------------------------------------------- network
 
@@ -385,7 +462,7 @@ grep -qx 'CONFIG_RD_ZSTD=y' "/boot/config-$KVER" || fail "the kernel cannot unpa
 contents=$(lsinitramfs "$initrd")
 grep -Eq "(^|/)lib/modules/$KVER/kernel/drivers/gpu/drm/amd/amdgpu/amdgpu\\.ko(\\.zst)?\$" <<<"$contents" ||
     fail "the initramfs has no amdgpu.ko for $KVER"
-if grep -E '(^|/)((mlan|moal|mt7921e|btusb|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' <<<"$contents"; then
+if grep -E '(^|/)((mlan|moal|mt7921e|mt7925e|btusb|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' <<<"$contents"; then
     fail "the initramfs has a Wi-Fi driver, its firmware, btusb or a frequency driver"
 fi
 audit=$(mktemp -d)

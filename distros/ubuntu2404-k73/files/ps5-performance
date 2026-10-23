@@ -35,6 +35,20 @@ contains_word() {
     tr '[:space:]' '\n' < "$file" | grep -qx "$expected"
 }
 
+# The current CPU/GPU frequency drivers were validated on regular PS5
+# hardware only. Both known Pro GPU IDs are available before either module is
+# loaded, so leave the Pro on the kernel's stock clock policy.
+for pci_device in /sys/bus/pci/devices/*; do
+    [ -r "$pci_device/vendor" ] && [ -r "$pci_device/device" ] || continue
+    [ "$(cat "$pci_device/vendor")" = 0x1002 ] || continue
+    case $(cat "$pci_device/device") in
+        0x13da|0x13dc)
+            log "PS5 Pro GPU detected; leaving frequency drivers unloaded"
+            exit 0
+            ;;
+    esac
+done
+
 mountpoint -q /boot/efi ||
     die "/boot/efi is not mounted; refusing to load the frequency drivers"
 if [ -e "$OPT_OUT" ]; then

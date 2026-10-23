@@ -1,9 +1,9 @@
 name: Ubuntu 24.04 7.3 image
 run-name: Ubuntu 24.04 7.3 image (${{ github.ref_name }})
 
-# Builds Ubuntu 24.04 LTS on Linux 7.3.0 for regular (fat and slim) PS5
-# consoles on firmware 11.xx and 13.xx, on GitHub-hosted x86_64 runners, in
-# two jobs:
+# Builds one Ubuntu 24.04 LTS image on Linux 7.3.0 for regular (fat and slim)
+# PS5 consoles and the experimental PS5 Pro path on firmware 11.xx and 13.xx,
+# on GitHub-hosted x86_64 runners, in two jobs:
 #
 #   kernel  The linux-ps5 7.3.0 kernel bundle from the CachyOS 7.3 workflow:
 #           the same scripts, the same input fingerprint, the same cache key
@@ -41,6 +41,7 @@ on:
   # ubuntu2404-k73-image-N tag.
   push:
     branches:
+      - main
       - ubuntu2404-k73-image
     paths:
       - '.github/workflows/ubuntu2404-k73-image.yml'
@@ -79,7 +80,7 @@ env:
   KERNEL_DIR: linux-bin/cachyos1160-k73
   PACKAGE: linux-ps5-7.3.0-4-x86_64.pkg.tar.zst
   DEB_DIR: linux-bin/ubuntu2404-k73
-  DEB: linux-ps5_7.3.0-5_amd64.deb
+  DEB: linux-ps5_7.3.0-6_amd64.deb
 
 jobs:
   kernel:
@@ -318,6 +319,7 @@ jobs:
           # This image needs the MediaTek Bluetooth patches in the kernel.
           grep -q 'ps5-mt7921-btusb-bulk-out.patch sha256' "$KERNEL_DIR/kernel/kernel-build-info.txt"
           grep -q 'ps5-mt7921-l2cap-defer-security.patch sha256' "$KERNEL_DIR/kernel/kernel-build-info.txt"
+          grep -q 'ps5-pro-amdgpu.patch sha256' "$KERNEL_DIR/kernel/kernel-build-info.txt"
           # The last line comes from the CachyOS boot-file check; this image
           # is not tied to one firmware's loader.
           {
@@ -561,7 +563,7 @@ jobs:
           set -euo pipefail
           min_free=$(awk '{print $2}' "$RUNNER_TEMP/disk-free-mb.log" | sort -n | head -n1)
           {
-            echo "PS5 Ubuntu 24.04 LTS image on Linux 7.3.0, firmware 11.xx and 13.xx (regular PS5, not Pro)"
+            echo "PS5 Ubuntu 24.04 LTS image on Linux 7.3.0, firmware 11.xx and 13.xx (regular PS5 and experimental PS5 Pro)"
             echo
             echo "Commit:      $GITHUB_SHA ($GITHUB_REF_NAME)"
             echo "Build run:   $RUN_URL"
@@ -625,23 +627,23 @@ jobs:
           cd "$DIST"
 
           cat > release-notes.md <<EOF
-          **Ubuntu 24.04 LTS on Linux 7.3.0 for regular PS5 consoles (fat and slim) on firmware 11.xx and 13.xx. Tester build: this exact image has not been booted on hardware yet.** PS5 Pro is not supported. Read the [profile notes](https://github.com/gzimbric/ps5-linux-image/blob/${GITHUB_SHA}/distros/ubuntu2404-k73/README.md) first. Fully power off between attempts instead of using Linux sleep or Rest Mode.
+          **Ubuntu 24.04 LTS on Linux 7.3.0 for regular PS5 consoles (fat and slim), with an experimental PS5 Pro path, on firmware 11.xx and 13.xx. Tester build: this exact image has not been booted on hardware yet.** The Pro loader/HV path and kernel-text access were proved separately, but Linux boot, display and devices on Pro still need testing. Read the [profile notes](https://github.com/gzimbric/ps5-linux-image/blob/${GITHUB_SHA}/distros/ubuntu2404-k73/README.md) first. Fully power off between attempts instead of using Linux sleep or Rest Mode.
 
           Built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). The hosted build and its read-only image checks passed; that is not a console boot.
 
           ### What's in it
 
           - Ubuntu 24.04 LTS desktop (GNOME, Firefox from the Mozilla PPA), logging in as \`ps5\` automatically.
-          - \`linux-ps5 7.3.0-5\`: mainline Linux 7.3 with rmux's 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`), kernel build #5: CachyOS Image 4's kernel plus the two MediaTek Bluetooth patches. On top: VivaLaVent's IW620 btusb fix from [ps5-bazzite-deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), and from [v1.0.4](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.4) the MediaTek Bluetooth fixes: WizGery's bulk OUT endpoint fix (from ps5-mediatek-fixes, ported to 7.3) and an L2CAP change that waits for encryption instead of refusing early connections. The image adds the matching udev rule (turns off the phantom second controller on interfaces 3 and 4 of USB \`0e8d:3603\`, also in the initramfs) and \`btusb enable_autosuspend=0\`, which applies to every btusb controller, the IW620 included.
-          - The CPU and GPU frequency drivers, loaded by \`ps5-performance.service\` after the fan target is set. To skip them, create an empty \`/boot/efi/disable-ps5-performance\` and fully power off.
+          - \`linux-ps5 7.3.0-6\`: mainline Linux 7.3 with rmux's 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`) and only the Pro-specific delta from rmux commit \`55161c0\`, ported without repinning the kernel. Kernel build #6 also includes VivaLaVent's IW620 btusb fix from [ps5-bazzite-deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), and from [v1.0.4](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.4) the MediaTek Bluetooth fixes: WizGery's bulk OUT endpoint fix (from ps5-mediatek-fixes, ported to 7.3) and an L2CAP change that waits for encryption instead of refusing early connections. The image adds the matching udev rule (turns off the phantom second controller on interfaces 3 and 4 of USB \`0e8d:3603\`, also in the initramfs) and \`btusb enable_autosuspend=0\`, which applies to every btusb controller, the IW620 included.
+          - The CPU and GPU frequency drivers, loaded by \`ps5-performance.service\` after the fan target is set on regular consoles. The service detects either Pro GPU ID and leaves both frequency drivers unloaded there. To skip them manually, create an empty \`/boot/efi/disable-ps5-performance\` and fully power off.
           - Fan: the ICC's automatic controller stays on with a 65 C target, set in \`/etc/default/ps5-fan\`.
-          - Wi-Fi: the IW620 driver (ps5-linux-mwifiex \`4bce848\` with the 7.3 compatibility patch, shipped in \`linux-ps5\`) and Linux 7.3's \`mt7921e\` for MediaTek consoles. The image has no IW620 firmware; the Wi-Fi loader writes the console's own copy to \`lib/nxp/\` on the boot partition and \`ps5-iw620-firmware.service\` installs it. Dumps from 11.xx (498108 bytes) and 13.xx (500296 bytes) loaders are both accepted. Never share that file.
+          - Wi-Fi: the IW620 driver (ps5-linux-mwifiex \`4bce848\` with the 7.3 compatibility patch, shipped in \`linux-ps5\`), Linux 7.3's \`mt7921e\` for regular MediaTek consoles, and its in-tree \`mt7925e\` for PS5 Pro. The three MT7925 Wi-Fi/Bluetooth blobs are byte-verified from the image's pinned linux-firmware revision. The image has no IW620 firmware; the Wi-Fi loader writes the console's own copy to \`lib/nxp/\` on the boot partition and \`ps5-iw620-firmware.service\` installs it. Dumps from 11.xx (498108 bytes) and 13.xx (500296 bytes) loaders are both accepted. Never share that file.
           - apt holds \`linux-ps5\`. When a package update rebuilds the initramfs, an initramfs-tools hook checks the new files and updates \`bzImage\` and \`initrd.img\` on the boot partition. When the kernel changes, the old pair is kept as \`bzImage.prev\` and \`initrd.img.prev\`.
           - \`ps5-boot-report.txt\` on the boot partition after each boot. It hides Wi-Fi names and MAC addresses but keeps IP addresses; check it before posting.
 
           ### Loader
 
-          Use a loader build that supports your firmware, does not need exact boot-file sizes and passes the Wi-Fi firmware to Linux on IW620 consoles, for example Sonic's 11.xx/13.xx release or a current [ps5-linux-loader](https://github.com/ps5-linux/ps5-linux-loader) build. Loader builds that need exact boot-file sizes, such as the 11.60 builds used with the Ubuntu 24.04 7.1.7 image (\`firmware-11.60-dma-e820-run18\`, the \`linux-1160-dma-e820-wifi\` target), refuse these files. On 11.60 the bounded builds from [\`firmware-11.60-dma-e820-bounded-run21\`](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21) also work: the Wi-Fi ELF on IW620 consoles, the non-Wi-Fi ELF on MediaTek consoles. The boot files need no exact sizes: \`bzImage\` is a relocatable KASLR kernel and \`bzImage\` plus \`initrd.img\` stay well under 160 MiB. Don't add \`nokaslr\`, \`mem=\` or \`memmap=\` to \`cmdline.txt\`.
+          Regular consoles can use a loader build that supports their firmware, does not need exact boot-file sizes and passes the Wi-Fi firmware to Linux on IW620 consoles, for example Sonic's regular-console 11.xx/13.xx release or a current [ps5-linux-loader](https://github.com/ps5-linux/ps5-linux-loader) build. PS5 Pro on 11.60 requires the new Pro-capable universal loader from [gzimbric/ps5-linux-loader](https://github.com/gzimbric/ps5-linux-loader); the older Run 18 and Run 21 11.60 ELFs are regular-console-only. Loader builds that need exact boot-file sizes, such as the 11.60 builds used with the Ubuntu 24.04 7.1.7 image (\`firmware-11.60-dma-e820-run18\`, the \`linux-1160-dma-e820-wifi\` target), refuse these files. On regular 11.60 consoles the bounded builds from [\`firmware-11.60-dma-e820-bounded-run21\`](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21) also work: the Wi-Fi ELF on IW620 consoles, the non-Wi-Fi ELF on MediaTek consoles. The boot files need no exact sizes: \`bzImage\` is a relocatable KASLR kernel and \`bzImage\` plus \`initrd.img\` stay well under 160 MiB. Don't add \`nokaslr\`, \`mem=\` or \`memmap=\` to \`cmdline.txt\`.
 
           ### MediaTek consoles
 

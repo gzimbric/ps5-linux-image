@@ -1,20 +1,18 @@
 # Ubuntu 24.04 on Linux 7.3.0
 
-Ubuntu 24.04 LTS desktop for regular PS5 consoles (fat and slim) on
-firmware 11.xx and 13.xx, on the shared Linux 7.3.0 kernel build (#5:
-CachyOS Image 4's kernel plus the two MediaTek Bluetooth patches). It is
-built by `.github/workflows/ubuntu2404-k73-image.yml` and published as a
-draft prerelease named `ubuntu2404-k73-image-N`.
+Ubuntu 24.04 LTS desktop for regular PS5 consoles (fat and slim), plus an
+experimental PS5 Pro path, on firmware 11.xx and 13.xx. It uses shared
+Linux 7.3.0 kernel build #6 and is built by
+`.github/workflows/ubuntu2404-k73-image.yml` as a draft prerelease named
+`ubuntu2404-k73-image-N`.
 
-**Status:** tester build. No image from this profile has been booted on a
-console yet. The Wi-Fi drivers and the PS5 services are the ones that booted
-in CachyOS Image 4 on 11.60, and the kernel is Image 4's kernel with the
-MediaTek Bluetooth fixes described below added. Those fixes are new here.
-
-PS5 Pro is not supported. The 7.3 patch set's Pro GPU support is not
-complete, and the Pro's Wi-Fi is an MT7925. The kernel builds Linux 7.3's
-mt7925e module, but nothing in this image has been set up or tested for the
-Pro.
+**Status:** tester build. The regular-console path inherits the drivers and
+services tested in CachyOS Image 4 on 11.60. The PS5 Pro loader/HV path and
+kernel-text access were proved separately, but Linux boot, display, Wi-Fi and
+Bluetooth on Pro still need hardware testing. This is one image for both:
+the kernel includes only the Pro-specific GPU delta from rmux commit
+`55161c0`, Linux 7.3's `mt7925e`, and the exact MT7925 Wi-Fi/Bluetooth
+firmware. The regular-only CPU/GPU frequency modules are skipped on Pro.
 
 ## Loader
 
@@ -22,6 +20,8 @@ Use a loader build that supports your firmware and does not need exact
 boot-file sizes, for example Sonic's 11.xx/13.xx release or a current
 [ps5-linux-loader](https://github.com/ps5-linux/ps5-linux-loader) build. On
 an IW620 console, use a build that passes the Wi-Fi firmware to Linux.
+PS5 Pro additionally needs a loader with the validated Pro HV path; a
+regular-console ELF is not a substitute.
 
 Loader builds that need exact boot-file sizes, such as the 11.60 builds used
 with the Ubuntu 24.04 7.1.7 image (`firmware-11.60-dma-e820-run18`, the
@@ -76,15 +76,15 @@ Raspberry Pi Imager can flash the `.img.xz` directly.
 
 | Piece | Where it comes from |
 | --- | --- |
-| Kernel | `linux-ps5 7.3.0-5`, kernel build #5: Linux v7.3 with rmux's 7.3 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at `36f173f`), the CPU and GPU frequency drivers as modules, VCN firmware built in, `MT7921E=m`. Made into a `.deb` from the shared k73 kernel bundle by `scripts/package-linux-ps5-k73-deb.sh`. |
+| Kernel | `linux-ps5 7.3.0-6`, kernel build #6: Linux v7.3 with rmux's 7.3 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at `36f173f`) plus only the Pro GPU delta from `55161c0`, without repinning. CPU/GPU frequency drivers are modules, VCN firmware is built in, and `MT7921E=m` plus `MT7925E=m`. Made into a `.deb` from the shared k73 kernel bundle by `scripts/package-linux-ps5-k73-deb.sh`. |
 | Bluetooth patches | VivaLaVent's IW620 btusb quirks fix from ps5-bazzite-deck v1.0.3, and from v1.0.4 WizGery's bulk OUT endpoint fix for the MediaTek controller (USB `0e8d:3603`) plus an L2CAP change that answers "pending" when a connection request beats the encryption change event. The patches are in `distros/cachyos1160-k73/kernel`, shared with the CachyOS image. |
 | IW620 Wi-Fi | mlan/moal from ps5-linux-mwifiex `4bce848` with the 7.3 compatibility patch, built against the same kernel tree and shipped in the `linux-ps5` package under `/usr/lib/modules/7.3.0/updates/ps5-iw620`. `ps5-iw620-firmware.service` copies the loader's firmware dump from `/boot/efi/lib/nxp/` and loads the driver. |
-| MediaTek Wi-Fi | Linux 7.3's `mt7921e` with `disable_aspm=1`, loaded by its PCI ID. Firmware from Ubuntu's `linux-firmware`. |
+| MediaTek Wi-Fi | Linux 7.3's `mt7921e` for regular consoles and `mt7925e` for Pro, loaded only by their PCI IDs. The regular firmware comes from Ubuntu's `linux-firmware`; the three Pro Wi-Fi/Bluetooth files are installed and SHA-256 checked from the same pinned linux-firmware revision used by the image build. |
 | MediaTek Bluetooth | `99-ps5-bt-phantom.rules` turns off interfaces 3 and 4 of `0e8d:3603` (a phantom second controller) and keeps the device out of autosuspend. The rule is in the initramfs too, so those interfaces are off before btusb can load. `btusb-ps5.conf` sets `enable_autosuspend=0` for every btusb controller, the IW620 included (as in Bazzite Deck v1.0.4). |
 | NetworkManager | `zz-ps5-iw620.conf`: no scan MAC randomization, the permanent MAC, power saving off. It is named to sort after Ubuntu's `default-wifi-powersave-on.conf`. |
 | BlueZ | Pairable, Just Works repairing and the userspace HID path, as in Image 4. |
-| Fan and clocks | `ps5fan.service` sets a 65 C target for the ICC's automatic fan control (`/etc/default/ps5-fan`); `ps5-performance.service` then loads the GPU and CPU frequency drivers. |
-| Display | amdgpu `dpm=0 gpu_recovery=0 force_1080p=1` and the eight Cyan Skillfish 2 firmware files in the initramfs, `consoleblank=0`, no `video=`. |
+| Fan and clocks | `ps5fan.service` sets a 65 C target for the ICC's automatic fan control (`/etc/default/ps5-fan`); `ps5-performance.service` then loads the GPU and CPU frequency drivers on regular consoles. It detects either Pro GPU ID and leaves those unvalidated frequency modules unloaded on Pro. |
+| Display | amdgpu `dpm=0 gpu_recovery=0 force_1080p=1` and the eight Cyan Skillfish 2 firmware files in the initramfs, `consoleblank=0`, no `video=`. On Pro, the kernel also supplies the 13DC ID, 16-CU geometry, nine golden registers, DCN 2.01 classification and the Pro CLK4 offset. |
 | Kernel updates | apt holds `linux-ps5`. See below. |
 | Boot report | `ps5-boot-report.txt` on the boot partition, 35 seconds after boot. |
 
@@ -103,9 +103,10 @@ Raspberry Pi Imager can flash the `.img.xz` directly.
 
 ## Firmware 11.xx and 13.xx
 
-Nothing in the image is firmware-specific, but this kernel has only been
-booted on 11.60 (as kernel #4 in CachyOS Image 4, before the MediaTek
-Bluetooth patches); 13.xx is untested. The one place the firmware showed was
+Nothing in the image is firmware-specific, but the regular-console base has
+only been booted on 11.60 (as kernel #4 in CachyOS Image 4, before the
+MediaTek Bluetooth patches), while the Pro Linux path and 13.xx are untested.
+The one place the firmware showed was
 the IW620 firmware the loader dumps: 498108 bytes on 11.xx and 500296 bytes
 on 13.xx. `ps5-iw620-firmware` accepts both (and the older loader sizes),
 and logs the size and SHA-256 of what it found. A dump of any other size is
@@ -120,6 +121,10 @@ console freezes about 20 seconds after boot, add `module_blacklist=btusb` to
 the end of the line in `cmdline.txt`. That turns Bluetooth off and leaves
 Wi-Fi working. `btusb.ps5_tx_ep=0` keeps btusb but goes back to the stock
 endpoint. Please report either case with `ps5-boot-report.txt`.
+
+On PS5 Pro, `mt7925e` and its required firmware are present, but that path is
+still a first-boot test. The boot report records the detected MediaTek PCI
+ID, module binding, firmware messages and Bluetooth USB IDs.
 
 ## If the display does not come up
 
@@ -168,7 +173,7 @@ The kernel was built with gcc 14 on Debian, so out-of-tree modules need
 ## Opting out
 
 - Frequency drivers: create an empty `disable-ps5-performance` on the boot
-  partition and fully power off.
+  partition and fully power off. They are skipped automatically on PS5 Pro.
 - Fan target: edit `PS5_FAN_TARGET_C` in `/etc/default/ps5-fan` (40 to 80)
   and run `sudo systemctl restart ps5fan`.
 
@@ -180,9 +185,9 @@ On an x86_64 Linux machine with Docker:
 ./scripts/build-linux-ps5-k73.sh
 sudo ./scripts/package-linux-ps5-k73.sh
 ./scripts/package-linux-ps5-k73-deb.sh
-sudo ./scripts/build-ubuntu2404-k73-image.sh --deb linux-bin/ubuntu2404-k73/linux-ps5_7.3.0-5_amd64.deb
+sudo ./scripts/build-ubuntu2404-k73-image.sh --deb linux-bin/ubuntu2404-k73/linux-ps5_7.3.0-6_amd64.deb
 sudo ./scripts/verify-ubuntu2404-k73-image.sh --image output/ps5-ubuntu2404-k73.img \
-  --deb linux-bin/ubuntu2404-k73/linux-ps5_7.3.0-5_amd64.deb
+  --deb linux-bin/ubuntu2404-k73/linux-ps5_7.3.0-6_amd64.deb
 ```
 
 The first command needs a case-sensitive filesystem for its output.
@@ -191,7 +196,8 @@ root filesystem; `image.yaml` holds the package list.
 
 ## Credits
 
-- rmux for the Linux 7.3 PS5 patch set and the frequency drivers.
+- rmux for the Linux 7.3 PS5 patch set, the frequency drivers and the Pro GPU
+  delta ported onto the pinned 7.3 base.
 - VivaLaVent for the btusb fixes, the 7.3 port of the MediaTek Bluetooth
   fix, the L2CAP change and the udev and modprobe settings
   (ps5-bazzite-deck).

@@ -66,5 +66,5 @@ A usr/local/sbin/ps5-amdgpu-reprobe f 0755 0 0 797 6a2d4657f2d845a01644e6b4e5f08
 A usr/local/sbin/ps5-boot-report f 0755 0 0 14036 ce891ff219dafc7a1f467efe056d99551f0119df91ac7813b88d730c94ffb03d
 A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2038 7b6098c5de8b58755f14e6b60264fdc8fe239e7c5ca8a337022bdb65caf012e4
 A usr/local/sbin/ps5-fan-target f 0755 0 0 747 3c7d73beb68513f925e884a951d5ddbedc0061e9fa307db6b89208c4c129cc01
-A usr/local/sbin/ps5-performance f 0755 0 0 3182 2bc89fc002e48d173c7693e3e50ee72e57d5de3c220a9dcc69d77d45c760748f
+A usr/local/sbin/ps5-performance f 0755 0 0 3759 1eab5a3dd1fa7fa9eb849e1e33aa60d01cb275e9687b4325e1b87506c39ea7af
 A usr/local/sbin/ps5-update-boot-files f 0755 0 0 6341 93b96ca6e5745c98ddae53b733db8f30174eaeb67a7883dfc1fede5d5db7cc41

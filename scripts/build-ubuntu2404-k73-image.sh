@@ -21,7 +21,7 @@ set -euo pipefail
 export LC_ALL=C
 
 DISTRO=ubuntu2404-k73
-DEB_VERSION=7.3.0-5
+DEB_VERSION=7.3.0-6
 DEFAULT_IMG_SIZE=12000
 
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)

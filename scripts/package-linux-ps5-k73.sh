@@ -17,10 +17,10 @@ umask 022
 
 KVER=7.3.0
 PKGNAME=linux-ps5
-# -4 is CachyOS Image 4's kernel. docker/kernel-builder/build-k73.sh now makes
-# kernel #5 (Image 4 plus the MediaTek Bluetooth patches), which the Ubuntu
-# image packages as 7.3.0-5. Bump this, the CachyOS workflow's PACKAGE and the
-# CachyOS image scripts together before the next CachyOS image is built.
+# -4 remains the shared transport package expected by CachyOS Image 4.
+# docker/kernel-builder/build-k73.sh now makes kernel #6; Ubuntu repackages it
+# as 7.3.0-6. Bump this, the CachyOS workflow's PACKAGE and the CachyOS image
+# scripts together before the next CachyOS image is built.
 PKGVER=${KVER}-4
 # Commit time of the pinned patch set (36f173f).
 SOURCE_DATE_EPOCH=1792339253
@@ -123,6 +123,8 @@ for f in .PKGINFO .INSTALL .MTREE "boot/vmlinuz-$KVER" \
   "usr/lib/modules/$KVER/kernel/drivers/cpufreq/ps5-cpufreq.ko" \
   "usr/lib/modules/$KVER/kernel/drivers/devfreq/ps5-gpufreq.ko" \
   "usr/lib/modules/$KVER/kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko" \
+  "usr/lib/modules/$KVER/kernel/drivers/net/wireless/mediatek/mt76/mt7925/mt7925e.ko" \
+  "usr/lib/modules/$KVER/kernel/drivers/bluetooth/btmtk.ko" \
   "usr/lib/modules/$KVER/build/Makefile" \
   "usr/share/licenses/$PKGNAME/LICENSE.amdgpu"; do
   grep -qxF -- "$f" <<<"$listing" || die "$f is missing from the package"

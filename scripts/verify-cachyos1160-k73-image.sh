@@ -327,6 +327,11 @@ grep -qF 'modprobe ps5_gpufreq' "$R/usr/local/sbin/ps5-performance" ||
   die "ps5-performance does not load the GPU driver first"
 grep -qF 'modprobe ps5_cpufreq' "$R/usr/local/sbin/ps5-performance" ||
   die "ps5-performance does not load the CPU driver"
+grep -qF '0x13da|0x13dc)' "$R/usr/local/sbin/ps5-performance" ||
+  die "ps5-performance does not skip both PS5 Pro GPU IDs"
+pro_guard_line=$(grep -nF '0x13da|0x13dc)' "$R/usr/local/sbin/ps5-performance" | cut -d: -f1)
+first_freq_load=$(grep -nE 'modprobe ps5_(gpu|cpu)freq' "$R/usr/local/sbin/ps5-performance" | head -1 | cut -d: -f1)
+((pro_guard_line < first_freq_load)) || die "ps5-performance checks for PS5 Pro after loading a frequency driver"
 ok "ps5-cpufreq and ps5-gpufreq installed, absent from early-load paths, guarded startup installed"
 
 # --------------------------------------------------------------- initramfs
