@@ -1,0 +1,40 @@
+#!/bin/sh
+# postinst for linux-ps5 __KVER__ (PS5 Ubuntu 24.04 7.3 image).
+# scripts/package-linux-ps5-k73-deb.sh fills in the version.
+#
+# Writes the module indexes and the initramfs. On the PS5 image,
+# update-initramfs then runs /etc/initramfs/post-update.d/zz-ps5-boot-files,
+# which checks both files and copies them to /boot/efi as bzImage and
+# initrd.img, keeping the old pair as .prev. A failure there fails this
+# script, so dpkg reports it and /boot/efi keeps the old files. By then dpkg
+# has already replaced the modules, and the old kernel has the same release
+# string, so the message says not to reboot until it is fixed.
+#
+# /etc/kernel/postinst.d is not run. Its hooks are for GRUB, which the PS5
+# does not use, and DKMS, which would build with the image's gcc 13 against
+# a kernel built with gcc 14.
+set -e
+
+KVER=__KVER__
+
+case "$1" in
+    configure)
+        depmod -a "$KVER"
+        if [ -e "/boot/initrd.img-$KVER" ]; then
+            mode=-u
+        else
+            mode=-c
+        fi
+        if ! update-initramfs "$mode" -k "$KVER"; then
+            echo "linux-ps5: DO NOT REBOOT: /usr/lib/modules/$KVER is the new build but /boot/efi still has the old kernel." >&2
+            echo "linux-ps5: Fix the error above and run 'sudo dpkg --configure -a', or reinstall the previous linux-ps5 .deb." >&2
+            exit 1
+        fi
+        if [ ! -x /etc/initramfs/post-update.d/zz-ps5-boot-files ]; then
+            echo "linux-ps5: this system has no PS5 boot-file hook. Copy" >&2
+            echo "linux-ps5: /boot/vmlinuz-$KVER and /boot/initrd.img-$KVER to the boot" >&2
+            echo "linux-ps5: partition as bzImage and initrd.img yourself." >&2
+        fi
+        ;;
+esac
+exit 0

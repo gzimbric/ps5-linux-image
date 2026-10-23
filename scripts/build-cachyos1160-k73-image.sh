@@ -624,6 +624,11 @@ for module in ps5_cpufreq ps5_gpufreq; do
   fi
   echo "ok  $module in $file, no alias, not in modules-load.d"
 done
+grep -qF '0x13da|0x13dc)' "$PROFILE/files/ps5-performance" ||
+  die "ps5-performance does not skip both PS5 Pro GPU IDs"
+pro_guard_line=$(grep -nF '0x13da|0x13dc)' "$PROFILE/files/ps5-performance" | cut -d: -f1)
+first_freq_load=$(grep -nE 'modprobe ps5_(gpu|cpu)freq' "$PROFILE/files/ps5-performance" | head -1 | cut -d: -f1)
+((pro_guard_line < first_freq_load)) || die "ps5-performance checks for PS5 Pro after loading a frequency driver"
 add_file 0755 "$PROFILE/files/ps5-performance" usr/local/sbin/ps5-performance
 add_file 0644 "$PROFILE/files/ps5-performance.service" \
   etc/systemd/system/ps5-performance.service

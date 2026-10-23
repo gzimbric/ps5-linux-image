@@ -1,0 +1,113 @@
+#!/bin/sh
+# Load the PS5 GPU and CPU clock drivers after cooling and display setup.
+# These drivers change SMU state that cannot be safely rolled back by simply
+# unloading the modules, so failures are reported without attempting rmmod.
+set -eu
+
+OPT_OUT=/boot/efi/disable-ps5-performance
+GPU=/sys/class/devfreq/ps5-gpufreq
+CPU=/sys/devices/system/cpu/cpufreq/policy0
+BOOST=/sys/devices/system/cpu/cpufreq/boost
+
+log() {
+    printf 'ps5-performance: %s\n' "$*"
+}
+
+die() {
+    printf 'ps5-performance: ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+wait_for() {
+    path=$1
+    remaining=15
+    while [ ! -e "$path" ] && [ "$remaining" -gt 0 ]; do
+        sleep 1
+        remaining=$((remaining - 1))
+    done
+    [ -e "$path" ]
+}
+
+contains_word() {
+    file=$1
+    expected=$2
+    [ -r "$file" ] || return 1
+    tr '[:space:]' '\n' < "$file" | grep -qx "$expected"
+}
+
+# The current CPU/GPU frequency drivers were validated on regular PS5
+# hardware only. Both known Pro GPU IDs are available before either module is
+# loaded, so leave the Pro on the kernel's stock clock policy.
+for pci_device in /sys/bus/pci/devices/*; do
+    [ -r "$pci_device/vendor" ] && [ -r "$pci_device/device" ] || continue
+    [ "$(cat "$pci_device/vendor")" = 0x1002 ] || continue
+    case $(cat "$pci_device/device") in
+        0x13da|0x13dc)
+            log "PS5 Pro GPU detected; leaving frequency drivers unloaded"
+            exit 0
+            ;;
+    esac
+done
+
+mountpoint -q /boot/efi ||
+    die "/boot/efi is not mounted; refusing to load the frequency drivers"
+if [ -e "$OPT_OUT" ]; then
+    if [ -d /sys/module/ps5_gpufreq ] || [ -d /sys/module/ps5_cpufreq ]; then
+        die "$OPT_OUT is present after a frequency driver was loaded; fully power off"
+    fi
+    log "$OPT_OUT is present; leaving the frequency drivers unloaded"
+    exit 0
+fi
+
+systemctl --quiet is-active ps5fan.service ||
+    die "ps5fan.service is not active"
+
+[ -r /sys/module/amdgpu/parameters/dpm ] ||
+    die "amdgpu's dpm parameter is unavailable"
+case $(cat /sys/module/amdgpu/parameters/dpm) in
+    0|N|n) ;;
+    *) die "amdgpu dpm=0 is required" ;;
+esac
+
+log "loading ps5_gpufreq"
+modprobe ps5_gpufreq
+wait_for "$GPU" || die "$GPU did not appear"
+[ "$(cat "$GPU/governor" 2>/dev/null)" = simple_ondemand ] ||
+    die "GPU governor is not simple_ondemand"
+contains_word "$GPU/available_frequencies" 400000000 ||
+    die "GPU 400 MHz state is missing"
+contains_word "$GPU/available_frequencies" 2230000000 ||
+    die "GPU 2230 MHz state is missing"
+
+log "loading ps5_cpufreq"
+modprobe ps5_cpufreq
+wait_for "$CPU" || die "$CPU did not appear"
+[ "$(cat "$CPU/scaling_driver" 2>/dev/null)" = ps5-cpufreq ] ||
+    die "CPU scaling driver is not ps5-cpufreq"
+contains_word "$CPU/scaling_available_frequencies" 800000 ||
+    die "CPU 800 MHz state is missing"
+contains_word "$CPU/scaling_available_frequencies" 3200000 ||
+    die "CPU 3200 MHz state is missing"
+
+for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+    [ -d "$policy" ] || continue
+    if [ "$(cat "$policy/scaling_governor" 2>/dev/null)" != schedutil ]; then
+        contains_word "$policy/scaling_available_governors" schedutil ||
+            die "schedutil is unavailable for ${policy##*/}"
+        printf '%s\n' schedutil > "$policy/scaling_governor"
+    fi
+    [ "$(cat "$policy/scaling_governor" 2>/dev/null)" = schedutil ] ||
+        die "${policy##*/} did not select schedutil"
+done
+
+if [ ! -r "$BOOST" ]; then
+    die "CPU boost state is unavailable"
+fi
+if [ "$(cat "$BOOST")" != 0 ]; then
+    [ -w "$BOOST" ] || die "CPU boost is enabled and cannot be disabled"
+    printf '0\n' > "$BOOST"
+fi
+[ "$(cat "$BOOST")" = 0 ] ||
+    die "CPU boost is still enabled"
+
+log "GPU simple_ondemand and CPU schedutil are active; CPU boost is off"

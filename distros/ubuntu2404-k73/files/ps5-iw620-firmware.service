@@ -1,0 +1,13 @@
+[Unit]
+Description=Install the PS5 IW620 Wi-Fi firmware from the boot partition
+After=local-fs.target systemd-udev-trigger.service
+Before=ps5-boot-report.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ps5-iw620-firmware
+RemainAfterExit=yes
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

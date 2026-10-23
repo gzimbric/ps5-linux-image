@@ -1,0 +1,91 @@
+#!/bin/sh
+# Install this console's IW620 Wi-Fi firmware from the boot partition, then
+# load the driver once the firmware is in place.
+#
+# A Wi-Fi loader build writes the console's own firmware to lib/nxp/ on the
+# FAT partition before Linux starts. The image ships no IW620 firmware.
+# Without that file, or on a console without the IW620, this does nothing and
+# Ethernet is unaffected.
+#
+# The loader copies a fixed number of bytes, and that number depends on the
+# console's firmware: 498108 bytes on 11.xx and 500296 on 13.xx, with older
+# loader tables using the other sizes below. Any of them is accepted, and the
+# size and SHA-256 are logged either way, so a report shows which dump the
+# console gave.
+set -eu
+
+name=nxp/pcieuartiw620_combo_v1.bin
+src=/boot/efi/lib/$name
+dst=/lib/firmware/$name
+sizes="492304 493000 493532 494536 497636 498108 500296"
+
+iw620=
+for dev in /sys/bus/pci/devices/*; do
+    [ "$(cat "$dev/vendor" 2>/dev/null)" = 0x1b4b ] || continue
+    [ "$(cat "$dev/device" 2>/dev/null)" = 0x2b56 ] || continue
+    iw620=$dev
+    break
+done
+if [ -z "$iw620" ]; then
+    echo "No IW620 Wi-Fi (PCI 1b4b:2b56) on this console"
+    exit 0
+fi
+
+known_size() {
+    for known in $sizes; do
+        [ "$1" = "$known" ] && return 0
+    done
+    return 1
+}
+
+# Say so when the firmware from an earlier boot is used instead of this
+# boot's dump.
+earlier_copy() {
+    [ -f "$dst" ] || return 0
+    echo "Using the copy installed on an earlier boot: $(stat -c %s "$dst") bytes, sha256 $(sha256sum "$dst" | cut -d' ' -f1)"
+}
+
+installed=0
+if [ ! -f "$src" ]; then
+    echo "No $src (the loader did not write the Wi-Fi firmware)"
+    earlier_copy
+else
+    src_size=$(stat -c %s "$src")
+    src_sha=$(sha256sum "$src" | cut -d' ' -f1)
+    if ! known_size "$src_size"; then
+        echo "Ignoring $src: $src_size bytes, sha256 $src_sha; expected one of: $sizes"
+        earlier_copy
+    elif cmp -s "$src" "$dst"; then
+        echo "Firmware already installed: $src_size bytes, sha256 $src_sha"
+    else
+        install -d -m 0755 "${dst%/*}"
+        install -m 0644 "$src" "$dst.new"
+        mv -f "$dst.new" "$dst"
+        installed=1
+        echo "Installed $dst from $src: $src_size bytes, sha256 $src_sha"
+    fi
+fi
+
+if [ ! -f "$dst" ]; then
+    echo "No IW620 firmware installed; Wi-Fi stays off"
+    exit 0
+fi
+
+# /etc/modprobe.d/ps5-iw620.conf keeps udev from loading moal through its PCI
+# alias, so this is the first load, now that the firmware is in place. If moal
+# was loaded by hand, keep it when it is bound and the firmware did not change,
+# and load it again otherwise.
+if [ -d /sys/module/moal ]; then
+    if [ "$installed" = 0 ] && [ -e "$iw620/driver" ]; then
+        echo "moal is bound to ${iw620##*/}"
+        exit 0
+    fi
+    modprobe -r moal
+fi
+modprobe moal
+if [ -e "$iw620/driver" ]; then
+    echo "moal is bound to ${iw620##*/}"
+else
+    echo "moal did not bind to ${iw620##*/}"
+    exit 1
+fi

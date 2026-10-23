@@ -1,0 +1,17 @@
+[Unit]
+Description=Enable the tested PS5 GPU and CPU clock scaling setup
+After=local-fs.target ps5fan.service ps5-amdgpu-reprobe.service
+Requires=ps5fan.service
+Wants=ps5-amdgpu-reprobe.service
+RequiresMountsFor=/boot/efi
+Before=getty@tty1.service ps5-boot-report.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ps5-performance
+RemainAfterExit=yes
+TimeoutStartSec=45
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

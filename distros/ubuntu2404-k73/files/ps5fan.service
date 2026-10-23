@@ -1,0 +1,16 @@
+[Unit]
+Description=Set the PS5 fan autoservo temperature target
+After=systemd-udev-trigger.service
+Before=ps5-performance.service getty@tty1.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/ps5-fan
+ExecStartPre=/usr/bin/timeout 30 /bin/sh -c 'while [ ! -w /sys/bus/platform/devices/ps5-fan/target_temp ]; do sleep 1; done'
+ExecStart=/usr/local/sbin/ps5-fan-target
+RemainAfterExit=yes
+TimeoutStartSec=65
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

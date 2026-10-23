@@ -4,9 +4,9 @@ run-name: CachyOS 7.3 11.60 image (${{ github.ref_name }})
 # Builds the CachyOS image on Linux 7.3.0 for PS5 firmware 11.60 on
 # GitHub-hosted x86_64 runners, in two jobs:
 #
-#   kernel  Linux v7.3 with rmux's 7.3 port of the PS5 patches
-#           (rmuxnet/ps5-linux-patches-1, pinned), in-tree MT7921 PCI support,
-#           the IW620 Wi-Fi modules for that kernel, and the linux-ps5 package.
+#   kernel  Linux v7.3 with rmux's pinned 7.3 port plus the Pro-only GPU
+#           follow-up, in-tree MT7921/MT7925 PCI support, the IW620 Wi-Fi
+#           modules for that kernel, and the linux-ps5 package.
 #   image   The official ps5-cachyos image with that kernel and the
 #           distros/cachyos1160-k73 profile, checked again read-only after the
 #           free blocks are zeroed, compressed to one .img.xz and attached to
@@ -285,6 +285,7 @@ jobs:
           )
           ./distros/cachyos1160-k73/files/ps5-1160-check-boot-files "$KERNEL_DIR/kernel/bzImage"
           (cd "$KERNEL_DIR" && sha256sum -c "$PACKAGE.sha256" && cd ps5-iw620 && sha256sum -c SHA256SUMS)
+          grep -q 'ps5-pro-amdgpu.patch sha256' "$KERNEL_DIR/kernel/kernel-build-info.txt"
           {
             echo '```'
             cat "$KERNEL_DIR/kernel/kernel-build-info.txt"

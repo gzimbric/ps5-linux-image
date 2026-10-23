@@ -1,0 +1,18 @@
+#!/bin/sh
+# initramfs-tools post-update hook (/etc/initramfs/post-update.d). After
+# update-initramfs writes an initramfs it runs this with the kernel version
+# and the file it wrote. For the linux-ps5 kernel, ps5-update-boot-files
+# checks the pair and copies it to the PS5 boot partition. When that fails,
+# update-initramfs fails too, so apt and dpkg report it, and /boot/efi keeps
+# the files it had.
+set -e
+
+version=${1:-}
+initrd=${2:-}
+[ -n "$version" ] && [ -n "$initrd" ] || exit 0
+[ -x /usr/local/sbin/ps5-update-boot-files ] || exit 0
+ps5_kernel=$(dpkg-query -L linux-ps5 2>/dev/null | sed -n 's|^/boot/vmlinuz-||p')
+[ "$version" = "$ps5_kernel" ] || exit 0
+# Nothing to copy when the initramfs was just deleted (update-initramfs -d).
+[ -f "$initrd" ] || exit 0
+exec /usr/local/sbin/ps5-update-boot-files --initrd "$initrd"

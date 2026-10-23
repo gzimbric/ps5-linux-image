@@ -226,7 +226,8 @@ The supported public range is 40-80 C; lower values cool more aggressively.
 The persistent correction shipped in [Image 4](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-4): it
 removes the legacy helper, applies 65 C at boot, checks the controller readback
 and records the target in the boot report. That change is **not** part of the
-published Image 3 archive or hashes, and Image 4 has not been booted yet.
+published Image 3 archive or hashes. Image 4 has since booted on the same
+console (see below).
 
 The exact hosted image has now passed one cold boot on the 11.60 test console.
 All five boot files matched the release identities, the root filesystem grew to
@@ -274,9 +275,10 @@ loaders refuse these boot-file sizes, and the similarly named
 ### Image 4 tester prerelease
 
 [Image 4](https://github.com/gzimbric/ps5-linux-image/releases/tag/cachyos1160-k73-image-4)
-is a public tester prerelease that has **not been booted on hardware yet**.
-Image 3 remains the newest CachyOS image with an identity-verified hardware
-boot. To test Image 4, follow the
+is a public tester prerelease. Its exact image, flashed with a verified
+readback, has booted once on a CFI-1115B running 11.60 with Sonic's all-11-13
+loader release. The first wake attempt powered the console off; the second
+booted. That is one boot, not a stability result. To test Image 4, follow the
 [Image 4 tester guide](https://github.com/gzimbric/ps5-linux-porting/blob/main/docs/cachyos1160-k73-image-4-tester-guide.md).
 
 | Item | Value |
@@ -287,7 +289,7 @@ boot. To test Image 4, follow the
 | Kernel | `linux-ps5 7.3.0-4` |
 | Archive | `ps5-cachyos1160-k73.img.xz`, 1,942,499,200 bytes, SHA-256 `bc83fc06b78c4b1f34498fc4f9657bcf84483ee5c3268e48047ad844dd8b7380` |
 | Raw image | 12,582,912,000 bytes, SHA-256 `b8346c5d8c34e643926f7c6a5d58c0017b0de8b18f944dcf7869a31759e971d5` |
-| Hardware status | Not booted; MediaTek Wi-Fi is experimental and untested on 11.60; MediaTek Bluetooth is unknown |
+| Hardware status | One boot on a CFI-1115B (IW620) running 11.60: HDMI Plasma desktop, wired SSH, every PS5 service active, IW620 firmware loaded (Wi-Fi not joined in that run), one Bluetooth controller, frequency drivers loaded. A MediaTek tester reported MediaTek Wi-Fi working with `module_blacklist=btusb`; without it, MediaTek Bluetooth froze the console about 20 s after boot |
 
 CI passed the image verifier, the bounded-loader limits and the single-file
 check. That covers the software checks, not a hardware boot. The archive is one
@@ -303,10 +305,11 @@ the runtime setting in
 copying its older Linux 7.1.7 driver source or binaries. Neither Wi-Fi driver
 is force-loaded on the other chipset.
 
-MediaTek Wi-Fi is structurally validated by the build and source checks but
-has not been tested on 11.60 hardware; the MediaTek Bluetooth path and hardware
-remain unknown. The Image 3 hardware result does not transfer to this new
-kernel or image. Both loaders are in the
+MediaTek Wi-Fi is structurally validated by the build and source checks, and
+one MediaTek tester reported it working on 11.60 with Bluetooth turned off
+(`module_blacklist=btusb`). On that console MediaTek Bluetooth through btusb
+froze the system about 20 s after boot. The Image 3 hardware result does not
+transfer to this new kernel or image. Both loaders are in the
 [bounded loader prerelease](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-dma-e820-bounded-run21).
 IW620 systems still use the bounded Wi-Fi ELF,
 `ps5-linux-loader-1160-dma-e820-bounded-wifi.elf`
@@ -340,6 +343,19 @@ stops before the release step if the archive reaches GitHub's 2 GiB per-file
 limit. All compilation, assembly, compression and uploading stays on the
 hosted runners; a Mac does not build or relay the artifact. Passing CI proves
 the software checks, not a hardware boot.
+
+## Ubuntu 24.04 on Linux 7.3.0 (11.xx and 13.xx)
+
+`distros/ubuntu2404-k73` is Ubuntu 24.04 LTS on the shared Linux 7.3.0
+kernel build #6 for regular PS5 consoles (fat and slim), plus an experimental
+PS5 Pro path, on firmware 11.xx and 13.xx. It carries the Image 4 Wi-Fi, fan,
+clock and boot-file fixes, the MediaTek Bluetooth fixes from VivaLaVent's
+ps5-bazzite-deck v1.0.4, and the Pro-only GPU delta ported onto the pinned 7.3
+patch set. The same image includes the in-tree MT7925 driver and pinned Pro
+Wi-Fi/Bluetooth firmware; regular-only frequency modules are skipped on Pro.
+`.github/workflows/ubuntu2404-k73-image.yml` builds it and makes a
+draft prerelease named `ubuntu2404-k73-image-N`; no image from it has been
+booted on Pro yet. See the [profile README](distros/ubuntu2404-k73/README.md).
 
 ## Prerequisites
 

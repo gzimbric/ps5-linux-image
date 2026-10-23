@@ -1,0 +1,230 @@
+#!/bin/bash
+# Check that PS5 boot files stay inside what the PS5 Linux loaders handle.
+#
+# None of the current loaders (upstream ps5-linux-loader and builds based on
+# it, such as Sonic's 11.xx and 13.xx release) needs exact file sizes. They
+# copy bzImage and initrd.img into fixed memory and start Linux from there,
+# and that only works for files like these:
+#
+# - bzImage is a normal x86 bzImage: boot protocol 2.15 or newer, 64-bit,
+#   loadable above 4 GiB, relocatable, and its payload and decompression
+#   window fit below the 1 GiB the loader works in;
+# - the kernel was built with KASLR (CONFIG_RANDOMIZE_BASE). KASLR is what
+#   moves the kernel out of the low memory the loader keeps for itself;
+# - bzImage and initrd.img together take at most 160 MiB, and initrd.img is a
+#   cpio archive or a compressed initramfs;
+# - cmdline.txt has no nokaslr, mem= or memmap= and no byte above 0x7f, since
+#   those keep the kernel in the reserved low memory or hand it back as RAM.
+#
+# These are generic safety checks for any firmware and loader, not a copy of
+# one loader's code. In one place this is stricter than the loaders: it
+# refuses NUL padding in front of the initramfs.
+#
+# Usage: ps5-check-boot-files BZIMAGE [INITRD [CMDLINE]]
+#
+# Prints the layout and exits 0 when the files pass, 1 when they do not, 2 on
+# a usage error.
+set -euo pipefail
+export LC_ALL=C
+
+MIB=$((1024 * 1024))
+MAX_BZIMAGE=$((64 * MIB))
+MAX_INITRD=$((128 * MIB))
+MAX_COMBINED=$((160 * MIB))
+PAGE=16384                     # the loader's logical page (4 x 4 KiB)
+LOAD_PA=$((0x100000))          # the loader copies the payload here
+DECOMPRESS_LIMIT=$((0x3fffc000))
+# Only in the decompressor's kaslr.o, which is linked with CONFIG_RANDOMIZE_BASE.
+KASLR_MESSAGE='Physical KASLR disabled: no suitable memory region!'
+HEADER_END=$((0x26c))
+INITRD_MIN=512
+CMDLINE_MAX=2047
+
+if (($# < 1 || $# > 3)); then
+  echo "Usage: $0 BZIMAGE [INITRD [CMDLINE]]" >&2
+  exit 2
+fi
+bzimage=$1 initrd=${2:-} cmdline=${3:-}
+
+failed=0
+refuse() {
+  echo "REFUSED: $*"
+  failed=1
+}
+
+u() { # file offset bytes
+  od -An -v -t "u$3" -j "$2" -N "$3" -- "$1" | tr -d ' \n'
+}
+
+align_up() { # value alignment
+  echo $(( ($1 + $2 - 1) / $2 * $2 ))
+}
+
+# ------------------------------------------------------------------ bzImage
+
+[[ -f $bzimage ]] || { echo "$bzimage: not a file" >&2; exit 2; }
+bz_size=$(stat -c %s -- "$bzimage")
+echo "bzImage: $bzimage, $bz_size bytes"
+if ((bz_size < HEADER_END || bz_size > MAX_BZIMAGE)); then
+  refuse "bzImage is $bz_size bytes, allowed $HEADER_END to $MAX_BZIMAGE"
+  exit 1
+fi
+
+check_bzimage() {
+  local boot_flag magic version setup_sects setup_size syssize payload
+  local loadflags xloadflags relocatable alignment pref aligned_load base
+  local init_size end cmdline_size kaslr setup_data
+
+  boot_flag=$(u "$bzimage" $((0x1fe)) 2)
+  ((boot_flag == 0xaa55)) || { refuse "no 0xaa55 boot flag"; return; }
+  magic=$(u "$bzimage" $((0x202)) 4)
+  ((magic == 0x53726448)) || { refuse "no HdrS magic"; return; }
+  version=$(u "$bzimage" $((0x206)) 2)
+  ((version >= 0x020f)) ||
+    { refuse "boot protocol $(printf '%#x' "$version"), needs 0x20f or newer"; return; }
+
+  # The protocol reads 0 as 4, but the loader computes (0 + 1) * 512.
+  setup_sects=$(u "$bzimage" $((0x1f1)) 1)
+  setup_size=$(( (setup_sects + 1) * 512 ))
+  if ((setup_sects == 0 || setup_sects > 64 || setup_size > bz_size)); then
+    refuse "setup_sects $setup_sects"
+    return
+  fi
+
+  # The loader copies syssize * 16 bytes; they must all be in the file.
+  syssize=$(u "$bzimage" $((0x1f4)) 4)
+  payload=$((syssize * 16))
+  if ((syssize == 0 || payload > bz_size - setup_size)); then
+    refuse "syssize $syssize does not fit the file"
+    return
+  fi
+
+  loadflags=$(u "$bzimage" $((0x211)) 1)
+  xloadflags=$(u "$bzimage" $((0x236)) 2)
+  if (((loadflags & 1) == 0 || (xloadflags & 1) == 0 || (xloadflags & 2) == 0)); then
+    refuse "needs LOADED_HIGH, XLF_KERNEL_64 and XLF_CAN_BE_LOADED_ABOVE_4G"
+    return
+  fi
+
+  # KASLR has to be able to move the kernel out of the loader's reserved low
+  # memory.
+  relocatable=$(u "$bzimage" $((0x234)) 1)
+  ((relocatable == 1)) || { refuse "kernel is not relocatable"; return; }
+
+  alignment=$(u "$bzimage" $((0x230)) 4)
+  if ((alignment < 0x200000 || alignment > 0x1000000 ||
+       (alignment & (alignment - 1)) != 0)); then
+    refuse "kernel_alignment $(printf '%#x' "$alignment")"
+    return
+  fi
+
+  # The payload copied to 0x100000 has to end below the decompression base.
+  pref=$(u "$bzimage" $((0x258)) 8)
+  aligned_load=$(align_up "$LOAD_PA" "$alignment")
+  base=$((aligned_load > pref ? aligned_load : pref))
+  if ((pref > DECOMPRESS_LIMIT || (pref & (alignment - 1)) != 0 ||
+       LOAD_PA + payload > base)); then
+    refuse "payload of $payload bytes at 0x100000 reaches the decompression base $(printf '%#x' "$base")"
+    return
+  fi
+
+  init_size=$(u "$bzimage" $((0x260)) 4)
+  end=$((base + init_size))
+  if ((init_size < payload || end > DECOMPRESS_LIMIT)); then
+    refuse "decompression window ends at $(printf '%#x' "$end"), limit $(printf '%#x' "$DECOMPRESS_LIMIT")"
+    return
+  fi
+
+  cmdline_size=$(u "$bzimage" $((0x238)) 4)
+  ((cmdline_size >= CMDLINE_MAX)) ||
+    { refuse "cmdline_size $cmdline_size, needs $CMDLINE_MAX"; return; }
+
+  # KASLR is what moves the kernel out of the loader's reserved low memory.
+  # The header does not show it, so look for kaslr.o's message in the code
+  # the loader copies. grep -c reads to the end, so nothing upstream gets
+  # SIGPIPE.
+  kaslr=$(tail -c +$((setup_size + 1)) -- "$bzimage" | head -c "$payload" |
+    grep -caF -- "$KASLR_MESSAGE" || true)
+  ((kaslr > 0)) ||
+    { refuse "the kernel was built without KASLR (no \"$KASLR_MESSAGE\")"; return; }
+
+  # The loader passes the header to Linux as it is.
+  setup_data=$(u "$bzimage" $((0x250)) 8)
+  ((setup_data == 0)) || { refuse "setup_data is not 0"; return; }
+
+  printf '  protocol %#x, setup %d bytes, payload %d bytes at 0x100000 (ends %#x, %d bytes below %#x)\n' \
+    "$version" "$setup_size" "$payload" $((LOAD_PA + payload)) \
+    $((base - LOAD_PA - payload)) "$base"
+  printf '  decompress %#x-%#x (init_size %d, %d bytes below %#x)\n' \
+    "$base" "$end" "$init_size" $((DECOMPRESS_LIMIT - end)) "$DECOMPRESS_LIMIT"
+}
+check_bzimage
+
+# ------------------------------------------------------------------ initrd
+
+if [[ -n $initrd ]]; then
+  [[ -f $initrd ]] || { echo "$initrd: not a file" >&2; exit 2; }
+  initrd_size=$(stat -c %s -- "$initrd")
+  echo "initrd.img: $initrd, $initrd_size bytes"
+  if ((initrd_size < INITRD_MIN || initrd_size > MAX_INITRD)); then
+    refuse "initrd.img is $initrd_size bytes, allowed $INITRD_MIN to $MAX_INITRD"
+  else
+    head6=$(od -An -v -t x1 -N 6 -- "$initrd" | tr -d ' \n')
+    case $head6 in
+      303730373031* | 303730373032*) format="newc cpio" ;;
+      28b52ffd*) format=zstd ;;
+      1f8b*) format=gzip ;;
+      fd377a585a00) format=xz ;;
+      02214c18*) format=lz4 ;;
+      5d0000*) format=lzma ;;
+      425a68*) format=bzip2 ;;
+      894c5a4f*) format=lzo ;;
+      *) format= ;;
+    esac
+    if [[ -z $format ]]; then
+      refuse "initrd.img is not a cpio archive or a compressed initramfs"
+    else
+      echo "  starts with $format"
+    fi
+  fi
+
+  combined=$(( $(align_up "$bz_size" $PAGE) + $(align_up "$initrd_size" $PAGE) ))
+  if ((combined > MAX_COMBINED)); then
+    refuse "bzImage and initrd.img take $combined bytes in 16 KiB pages, limit $MAX_COMBINED"
+  else
+    echo "  bzImage + initrd.img: $combined of $MAX_COMBINED bytes in 16 KiB pages"
+  fi
+fi
+
+# ----------------------------------------------------------------- cmdline
+
+if [[ -n $cmdline ]]; then
+  [[ -f $cmdline ]] || { echo "$cmdline: not a file" >&2; exit 2; }
+  cmdline_size=$(stat -c %s -- "$cmdline")
+  echo "cmdline.txt: $cmdline, $cmdline_size bytes"
+  if ((cmdline_size > CMDLINE_MAX)); then
+    refuse "cmdline.txt is $cmdline_size bytes; the loader reads $CMDLINE_MAX"
+  fi
+  # KASLR is what moves the kernel out of the loader's reserved low memory.
+  # A small mem= or more than four memmap= options keep it there too, and
+  # memmap= can turn the reserved memory back into RAM. An option counts at
+  # the start, after a space or control byte, or after a quote, as in the
+  # loader.
+  if grep -q nokaslr -- "$cmdline"; then
+    refuse "cmdline.txt contains nokaslr"
+  fi
+  if grep -qE '(^|[[:cntrl:] "])(mem|memmap)=' -- "$cmdline"; then
+    refuse "cmdline.txt has a mem= or memmap= option"
+  fi
+  # The kernel reads 0xa0 as a space, so an option after it would get past
+  # the check above.
+  if (($(tr -d '\000-\177' < "$cmdline" | wc -c) > 0)); then
+    refuse "cmdline.txt has a byte above 0x7f"
+  fi
+fi
+
+if ((failed)); then
+  echo "These boot files are outside the PS5 loader limits."
+  exit 1
+fi
+echo "ok: the PS5 loader limits are met"
