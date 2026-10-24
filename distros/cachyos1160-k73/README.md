@@ -439,7 +439,7 @@ modpost warning, and checks `.return_sites`, the vermagic and the IW620 PCI
 alias. Passing those gates does not replace an exact-image hardware test.
 
 [`scripts/package-linux-ps5-k73.sh`](../../scripts/package-linux-ps5-k73.sh)
-packages the kernel as `linux-ps5 7.3.0-4` for pacman, laid out like the
+packages the current kernel as `linux-ps5 7.3.0-5` for pacman, laid out like the
 upstream package (kernel, modules, build headers, UAPI headers) plus AMD's
 licence for `ps5_vcn.bin` in `/usr/share/licenses/linux-ps5`. Its install
 script does nothing to `/boot/efi`; the pacman hook below does that.
@@ -450,7 +450,7 @@ script does nothing to `/boot/efi`; the pacman hook below does that.
 checks the base download, its partition table and both partition hashes,
 then in a chroot without network:
 
-1. replaces `linux-ps5 7.1.7-1` with `7.3.0-4` (`pacman -U`, install script
+1. replaces `linux-ps5 7.1.7-1` with `7.3.0-5` (`pacman -U`, install script
    skipped) and removes the old `/boot/initrd.img-7.1.7`;
 2. verifies the in-tree `mt7921e` module and its packaged firmware, installs
    its ASPM option, then installs `mlan.ko` and `moal.ko` in
@@ -530,7 +530,7 @@ when it exits.
 
 What is different:
 
-- **Kernel.** Current source uses `linux-ps5 7.3.0-4` in place of 7.1.7.
+- **Kernel.** Current source uses `linux-ps5 7.3.0-5` in place of 7.1.7.
   The 7.1.7 package also
   carried a modules-load entry and options for its own Wi-Fi build, the
   `ps5-stage-firmware` helper and `ps5-bt-quiet`; they go with it. The

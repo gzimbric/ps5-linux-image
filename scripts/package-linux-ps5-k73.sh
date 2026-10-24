@@ -17,11 +17,10 @@ umask 022
 
 KVER=7.3.0
 PKGNAME=linux-ps5
-# -4 remains the shared transport package expected by CachyOS Image 4.
-# docker/kernel-builder/build-k73.sh now makes kernel #6; Ubuntu repackages it
-# as 7.3.0-6. Bump this, the CachyOS workflow's PACKAGE and the CachyOS image
-# scripts together before the next CachyOS image is built.
-PKGVER=${KVER}-4
+# -5 identifies the new kernel bytes from build #7. Published CachyOS Image 4
+# remains on -4; a future CachyOS build must not reuse that package identity.
+# Ubuntu repackages this same kernel as 7.3.0-7.
+PKGVER=${KVER}-5
 # Commit time of the pinned patch set (36f173f).
 SOURCE_DATE_EPOCH=1792339253
 

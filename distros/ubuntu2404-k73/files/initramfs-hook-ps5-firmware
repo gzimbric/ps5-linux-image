@@ -15,9 +15,10 @@ for name in ce me mec mec2 pfp rlc sdma sdma1; do
     cp -L "/usr/lib/firmware/amdgpu/$file" "$dest/$file"
 done
 # udev in the initramfs turns off the phantom interfaces 3 and 4 of the
-# MediaTek controller (0e8d:3603) before the root filesystem's udev loads
-# btusb, which would otherwise bind them while their own events are still
-# queued. Ubuntu's udev hook copies custom rules from /etc/udev/rules.d to the
-# same place; this keeps the rule there if that ever changes.
+# regular and Pro MediaTek controllers (0e8d:3603 and 0e8d:3605) before the
+# root filesystem's udev loads btusb, which would otherwise bind them while
+# their own events are still queued. Ubuntu's udev hook copies custom rules
+# from /etc/udev/rules.d to the same place; this keeps the rule there if that
+# ever changes.
 mkdir -p "$DESTDIR/usr/lib/udev/rules.d"
 cp /etc/udev/rules.d/99-ps5-bt-phantom.rules "$DESTDIR/usr/lib/udev/rules.d/"

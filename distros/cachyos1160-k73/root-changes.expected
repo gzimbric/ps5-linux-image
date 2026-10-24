@@ -1,7 +1,7 @@
 # Every root filesystem (p1) change scripts/build-cachyos1160-k73-image.sh is
 # allowed to make to the official ps5-cachyos image, apart from the kernel
 # package swap. The build compares full before/after file manifests of the
-# root partition. Paths owned by linux-ps5 7.1.7-1 or 7.3.0-4 are the kernel
+# root partition. Paths owned by linux-ps5 7.1.7-1 or 7.3.0-5 are the kernel
 # swap, which pacman checks; every other difference must match this list
 # exactly.
 #

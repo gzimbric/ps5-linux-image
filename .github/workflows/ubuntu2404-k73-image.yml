@@ -78,9 +78,9 @@ env:
   # and PACKAGE have to stay the same as there; the kernel job checks that.
   CACHYOS_WORKFLOW: .github/workflows/cachyos1160-k73-image.yml
   KERNEL_DIR: linux-bin/cachyos1160-k73
-  PACKAGE: linux-ps5-7.3.0-4-x86_64.pkg.tar.zst
+  PACKAGE: linux-ps5-7.3.0-5-x86_64.pkg.tar.zst
   DEB_DIR: linux-bin/ubuntu2404-k73
-  DEB: linux-ps5_7.3.0-6_amd64.deb
+  DEB: linux-ps5_7.3.0-7_amd64.deb
 
 jobs:
   kernel:
@@ -627,14 +627,14 @@ jobs:
           cd "$DIST"
 
           cat > release-notes.md <<EOF
-          **Ubuntu 24.04 LTS on Linux 7.3.0 for regular PS5 consoles (fat and slim), with an experimental PS5 Pro path, on firmware 11.xx and 13.xx. Tester build: this exact image has not been booted on hardware yet.** The Pro loader/HV path and kernel-text access were proved separately, but Linux boot, display and devices on Pro still need testing. Read the [profile notes](https://github.com/gzimbric/ps5-linux-image/blob/${GITHUB_SHA}/distros/ubuntu2404-k73/README.md) first. Fully power off between attempts instead of using Linux sleep or Rest Mode.
+          **Ubuntu 24.04 LTS on Linux 7.3.0 for regular PS5 consoles (fat and slim), with an experimental PS5 Pro path, on firmware 11.xx and 13.xx. Tester build: this exact image has not been booted on hardware yet.** An earlier image reached the desktop at 1080p on one 11.60 Pro with wired SSH, Wi-Fi and USB input. The \`0e8d:3605\` Pro Bluetooth changes in this build are source-only and still need a pairing and cold-reconnect test. Read the [profile notes](https://github.com/gzimbric/ps5-linux-image/blob/${GITHUB_SHA}/distros/ubuntu2404-k73/README.md) first. Fully power off between attempts instead of using Linux sleep or Rest Mode.
 
           Built from ${GITHUB_SHA:0:7} by [this run]($RUN_URL). The hosted build and its read-only image checks passed; that is not a console boot.
 
           ### What's in it
 
           - Ubuntu 24.04 LTS desktop (GNOME, Firefox from the Mozilla PPA), logging in as \`ps5\` automatically.
-          - \`linux-ps5 7.3.0-6\`: mainline Linux 7.3 with rmux's 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`) and only the Pro-specific delta from rmux commit \`55161c0\`, ported without repinning the kernel. Kernel build #6 also includes VivaLaVent's IW620 btusb fix from [ps5-bazzite-deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), and from [v1.0.4](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.4) the MediaTek Bluetooth fixes: WizGery's bulk OUT endpoint fix (from ps5-mediatek-fixes, ported to 7.3) and an L2CAP change that waits for encryption instead of refusing early connections. The image adds the matching udev rule (turns off the phantom second controller on interfaces 3 and 4 of USB \`0e8d:3603\`, also in the initramfs) and \`btusb enable_autosuspend=0\`, which applies to every btusb controller, the IW620 included.
+          - \`linux-ps5 7.3.0-7\`: mainline Linux 7.3 with rmux's 7.3 PS5 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at \`36f173f\`) and only the Pro-specific delta from rmux commit \`55161c0\`, ported without repinning the kernel. Kernel build #7 also includes VivaLaVent's IW620 btusb fix from [ps5-bazzite-deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3), and from [v1.0.4](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.4) the MediaTek Bluetooth fixes: WizGery's bulk OUT endpoint fix (from ps5-mediatek-fixes, ported to 7.3) and an L2CAP change that waits for encryption instead of refusing early connections. The image adds the matching udev rule (turns off the phantom second controller on interfaces 3 and 4 of USB \`0e8d:3603\` and the Pro's \`0e8d:3605\`, also in the initramfs) and \`btusb enable_autosuspend=0\`, which applies to every btusb controller, the IW620 included. The \`3605\` extension matches the captured USB layout but is not hardware-verified.
           - The CPU and GPU frequency drivers, loaded by \`ps5-performance.service\` after the fan target is set on regular consoles. The service detects either Pro GPU ID and leaves both frequency drivers unloaded there. To skip them manually, create an empty \`/boot/efi/disable-ps5-performance\` and fully power off.
           - Fan: the ICC's automatic controller stays on with a 65 C target, set in \`/etc/default/ps5-fan\`.
           - Wi-Fi: the IW620 driver (ps5-linux-mwifiex \`4bce848\` with the 7.3 compatibility patch, shipped in \`linux-ps5\`), Linux 7.3's \`mt7921e\` for regular MediaTek consoles, and its in-tree \`mt7925e\` for PS5 Pro. The three MT7925 Wi-Fi/Bluetooth blobs are byte-verified from the image's pinned linux-firmware revision. The image has no IW620 firmware; the Wi-Fi loader writes the console's own copy to \`lib/nxp/\` on the boot partition and \`ps5-iw620-firmware.service\` installs it. Dumps from 11.xx (498108 bytes) and 13.xx (500296 bytes) loaders are both accepted. Never share that file.
@@ -647,7 +647,7 @@ jobs:
 
           ### MediaTek consoles
 
-          If the console freezes about 20 seconds after boot, add \`module_blacklist=btusb\` to the end of the line in \`cmdline.txt\` (Bluetooth is then off, Wi-Fi still works) and report it with \`ps5-boot-report.txt\`. \`btusb.ps5_tx_ep=0\` goes back to the stock Bluetooth endpoint for a test.
+          If the console freezes about 20 seconds after boot, add \`module_blacklist=btusb\` to the end of the line in \`cmdline.txt\` (Bluetooth is then off, Wi-Fi still works) and report it with \`ps5-boot-report.txt\`. \`btusb.ps5_tx_ep=0\` goes back to the stock Bluetooth endpoint for a test. Pro Bluetooth is untested in this build; do not treat enumeration alone as success. Pair a controller, cold boot and confirm that it reconnects before reporting it working.
 
           ### Login
 

@@ -10,16 +10,18 @@ index 787a15b5d..45a44c13a 100644
  static bool enable_poll_sync = IS_ENABLED(CONFIG_BT_HCIBTUSB_POLL_SYNC);
  static bool reset = true;
  
-@@ -4253,6 +4254,27 @@ static int btusb_probe(struct usb_interface *intf,
+@@ -4253,6 +4254,29 @@ static int btusb_probe(struct usb_interface *intf,
  	if (err)
  		goto err_free_data;
  
-+	/* PS5 MediaTek (0e8d:3603): the chip only drains ACL data from the
++	/* PS5 MediaTek (0e8d:3603/3605): the chip only drains ACL data from the
 +	 * second bulk OUT endpoint (0x02), the one paired with bulk IN 0x82.
 +	 * (WizGery/ps5-mediatek-fixes 0003, ported to the 7.3 probe code.)
 +	 */
 +	if (le16_to_cpu(interface_to_usbdev(intf)->descriptor.idVendor) == 0x0e8d &&
-+	    le16_to_cpu(interface_to_usbdev(intf)->descriptor.idProduct) == 0x3603 && ps5_tx_ep) {
++	    (le16_to_cpu(interface_to_usbdev(intf)->descriptor.idProduct) == 0x3603 ||
++	     le16_to_cpu(interface_to_usbdev(intf)->descriptor.idProduct) == 0x3605) &&
++	    ps5_tx_ep) {
 +		struct usb_host_interface *alt = intf->cur_altsetting;
 +		int i;
 +
@@ -38,7 +40,7 @@ index 787a15b5d..45a44c13a 100644
  	if (id->driver_info & BTUSB_AMP) {
  		data->cmdreq_type = USB_TYPE_CLASS | 0x01;
  		data->cmdreq = 0x2b;
-@@ -4881,6 +4903,9 @@ MODULE_PARM_DESC(force_scofix, "Force fixup of wrong SCO buffers size");
+@@ -4881,6 +4905,9 @@ MODULE_PARM_DESC(force_scofix, "Force fixup of wrong SCO buffers size");
  module_param(enable_autosuspend, bool, 0644);
  MODULE_PARM_DESC(enable_autosuspend, "Enable USB autosuspend by default");
  

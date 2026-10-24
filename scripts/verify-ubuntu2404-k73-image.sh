@@ -21,7 +21,7 @@ shopt -s inherit_errexit
 export LC_ALL=C
 
 KVER=7.3.0
-DEB_VERSION=7.3.0-6
+DEB_VERSION=7.3.0-7
 ROOT_LABEL=ubuntu2404-k73
 P2_START=2048 P2_SECTORS=1021952 P1_START=1024000
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
@@ -441,6 +441,14 @@ ok "NetworkManager in effect: powersave 2 (off), permanent MAC, no scan MAC rand
 
 same "$R/etc/udev/rules.d/99-ps5-bt-phantom.rules" "$F/99-ps5-bt-phantom.rules" \
   "/etc/udev/rules.d/99-ps5-bt-phantom.rules"
+for product in 3603 3605; do
+  [[ $(grep -cF "ATTRS{idProduct}==\"$product\"" \
+    "$R/etc/udev/rules.d/99-ps5-bt-phantom.rules") == 2 ]] ||
+    die "the MediaTek rule does not deauthorize both phantom interfaces for 0e8d:$product"
+  [[ $(grep -cF "ATTR{idProduct}==\"$product\"" \
+    "$R/etc/udev/rules.d/99-ps5-bt-phantom.rules") == 1 ]] ||
+    die "the MediaTek rule does not disable autosuspend for 0e8d:$product"
+done
 same "$R/etc/modprobe.d/btusb-ps5.conf" "$F/btusb-ps5.conf" "/etc/modprobe.d/btusb-ps5.conf"
 for value in AlwaysPairable=true PairableTimeout=0 ControllerMode=dual \
   Privacy=device JustWorksRepairing=always AutoEnable=true; do
@@ -481,6 +489,10 @@ for f in ps5fan ps5-amdgpu-reprobe ps5-performance ps5-iw620-firmware ps5-bt-qui
 done
 same "$R/etc/systemd/system/ps5-boot-report.timer" "$F/ps5-boot-report.timer" \
   "/etc/systemd/system/ps5-boot-report.timer"
+grep -qxF 'TimeoutStartSec=120' "$R/etc/systemd/system/ps5-boot-report.service" ||
+  die "ps5-boot-report.service does not allow the bounded probes to finish"
+grep -qF "timeout 30 sh <<'PS5_SYSFS'" "$R/usr/local/sbin/ps5-boot-report" ||
+  die "ps5-boot-report does not bound aggregate sysfs telemetry"
 for f in ps5-boot-report ps5-amdgpu-reprobe ps5-fan-target; do
   same "$R/usr/local/sbin/$f" "$F/$f" "/usr/local/sbin/$f"
 done

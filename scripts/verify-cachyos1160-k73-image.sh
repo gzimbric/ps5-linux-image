@@ -19,7 +19,7 @@ shopt -s inherit_errexit
 export LC_ALL=C
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-4"
+NEW_PACKAGE="linux-ps5 7.3.0-5"
 IMAGE_SIZE=12582912000
 P1_START=1024000 P1_SECTORS=23549952
 P2_START=2048 P2_SECTORS=1021952
@@ -147,8 +147,8 @@ ok "bzImage: $version"
 # ------------------------------------------------------------------ kernel
 
 db=$(cd -- "$R/var/lib/pacman/local" && find . -mindepth 1 -maxdepth 1 -name 'linux-ps5-*' -printf '%P\n')
-[[ $db == linux-ps5-7.3.0-4 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
-[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-4 ]] ||
+[[ $db == linux-ps5-7.3.0-5 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
+[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-5 ]] ||
   die "pacman database does not say $NEW_PACKAGE"
 modules=$(cd -- "$R/usr/lib/modules" && find . -mindepth 1 -maxdepth 1 -printf '%P\n')
 [[ $modules == "$KVER" ]] || die "kernel module trees: ${modules//$'\n'/ }"
