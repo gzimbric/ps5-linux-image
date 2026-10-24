@@ -202,6 +202,7 @@ for option in nokaslr mem memmap video; do
   fi
 done
 grep -qw consoleblank=0 "$B/cmdline.txt" || die "cmdline.txt has no consoleblank=0"
+grep -qw usbcore.autosuspend=-1 "$B/cmdline.txt" || die "cmdline.txt has no usbcore.autosuspend=-1"
 ok "cmdline.txt has no nokaslr, mem=, memmap= or video="
 [[ $(sha "$B/vram.txt") == "$VRAM_SHA256" ]] || die "vram.txt changed"
 [[ $(sha "$B/kexec.sh") == "$KEXEC_SHA256" ]] || die "kexec.sh changed"
