@@ -34,9 +34,10 @@ umask 022
 
 KVER=7.3.0
 PKGNAME=linux-ps5
-# 7.3.0-5 added the MediaTek Bluetooth patches. -6 adds the Pro amdgpu
-# follow-up and MT7925 verification (KBUILD_BUILD_VERSION 6).
-DEB_VERSION=${KVER}-6
+# 7.3.0-6 added the Pro amdgpu follow-up and MT7925 verification. -7 extends
+# the MediaTek Bluetooth endpoint handling to the Pro's 0e8d:3605 controller
+# (KBUILD_BUILD_VERSION 7).
+DEB_VERSION=${KVER}-7
 # Commit time of the pinned patch set (36f173f), as in the pacman package.
 SOURCE_DATE_EPOCH=1792339253
 export SOURCE_DATE_EPOCH
@@ -66,7 +67,7 @@ for cmd in tar zstd dpkg-deb sha256sum md5sum find sort; do
   command -v "$cmd" >/dev/null || die "missing command: $cmd"
 done
 kernel_dir=$(cd -- "$kernel_dir" && pwd)
-[[ -n $package ]] || package=$kernel_dir/$PKGNAME-$KVER-4-x86_64.pkg.tar.zst
+[[ -n $package ]] || package=$kernel_dir/$PKGNAME-$KVER-5-x86_64.pkg.tar.zst
 [[ -f $package ]] || die "$package is missing; build the kernel bundle first"
 [[ -f $kernel_dir/kernel/bzImage ]] || die "$kernel_dir/kernel/bzImage is missing"
 for module in mlan moal; do

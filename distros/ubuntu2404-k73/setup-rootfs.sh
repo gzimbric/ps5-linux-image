@@ -21,7 +21,7 @@ export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 KVER=7.3.0
-DEB_VERSION=7.3.0-6
+DEB_VERSION=7.3.0-7
 B=/opt/ps5-bootstrap
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
 MT7925E_MODULE=kernel/drivers/net/wireless/mediatek/mt76/mt7925/mt7925e.ko
@@ -133,6 +133,13 @@ put 0644 ps5-iw620.conf /etc/modprobe.d/ps5-iw620.conf
 put 0644 ps5-mt7921e.conf /etc/modprobe.d/ps5-mt7921e.conf
 put 0644 btusb-ps5.conf /etc/modprobe.d/btusb-ps5.conf
 put 0644 99-ps5-bt-phantom.rules /etc/udev/rules.d/99-ps5-bt-phantom.rules
+bt_rule=/etc/udev/rules.d/99-ps5-bt-phantom.rules
+for product in 3603 3605; do
+    [ "$(grep -cF "ATTRS{idProduct}==\"$product\"" "$bt_rule")" -eq 2 ] ||
+        fail "$bt_rule does not deauthorize both phantom interfaces for 0e8d:$product"
+    [ "$(grep -cF "ATTR{idProduct}==\"$product\"" "$bt_rule")" -eq 1 ] ||
+        fail "$bt_rule does not disable autosuspend for 0e8d:$product"
+done
 put 0644 ps5-ethernet.conf /etc/modules-load.d/ps5-ethernet.conf
 put 0644 zz-ps5-iw620.conf /etc/NetworkManager/conf.d/zz-ps5-iw620.conf
 put 0755 ps5-iw620-firmware /usr/local/sbin/ps5-iw620-firmware
@@ -443,6 +450,10 @@ systemd-analyze verify \
     /etc/systemd/system/ps5-ssh-host-keys.service \
     /etc/systemd/system/ps5-boot-report.service \
     /etc/systemd/system/ps5-boot-report.timer
+grep -qxF 'TimeoutStartSec=120' /etc/systemd/system/ps5-boot-report.service ||
+    fail "ps5-boot-report.service does not allow the bounded probes to finish"
+grep -qF "timeout 30 sh <<'PS5_SYSFS'" /usr/local/sbin/ps5-boot-report ||
+    fail "ps5-boot-report does not bound aggregate sysfs telemetry"
 for unit in NetworkManager.service ssh.service bluetooth.service grow-rootfs.service \
     systemd-resolved.service ps5-ssh-host-keys.service ps5fan.service \
     ps5-amdgpu-reprobe.service ps5-performance.service ps5-iw620-firmware.service \

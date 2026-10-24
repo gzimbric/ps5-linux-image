@@ -1,6 +1,10 @@
-# PS5 MediaTek Bluetooth (0e8d:3603): interfaces 3 and 4 expose a second,
-# phantom controller that keeps the real one from working. Disable them.
+# PS5 MediaTek Bluetooth (0e8d:3603 and the Pro's 0e8d:3605): interfaces 3
+# and 4 expose a second, phantom controller. Disable that function before
+# btusb loads so only interfaces 0-2 can create an HCI controller.
 ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0e8d", ATTRS{idProduct}=="3603", ATTR{bInterfaceNumber}=="03", ATTR{authorized}="0"
 ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0e8d", ATTRS{idProduct}=="3603", ATTR{bInterfaceNumber}=="04", ATTR{authorized}="0"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0e8d", ATTRS{idProduct}=="3605", ATTR{bInterfaceNumber}=="03", ATTR{authorized}="0"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0e8d", ATTRS{idProduct}=="3605", ATTR{bInterfaceNumber}=="04", ATTR{authorized}="0"
 # The chip stalls with USB autosuspend.
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", ATTR{idProduct}=="3603", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", ATTR{idProduct}=="3605", TEST=="power/control", ATTR{power/control}="on"

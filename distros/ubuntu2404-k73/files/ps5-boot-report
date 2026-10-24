@@ -161,6 +161,7 @@ scrub() {
     lsusb 2>&1 || true
     lsusb -d 1286:2059 2>&1 || true
     lsusb -d 0e8d:3603 2>&1 || true
+    lsusb -d 0e8d:3605 2>&1 || true
     lsusb -d 0e8d: 2>&1 || true
     lsusb -t 2>&1 || true
     btusb=$(modinfo -n btusb 2>/dev/null || true)
@@ -198,8 +199,8 @@ scrub() {
             "$(cat "$controller/address" 2>/dev/null || echo unavailable)" \
             "$(readlink -f "$controller/device" 2>/dev/null || echo unavailable)"
     done
-    # IW620 (1286:2059) and MediaTek (0e8d:3603) Bluetooth. On the MediaTek
-    # one, 99-ps5-bt-phantom.rules deauthorizes interfaces 3 and 4.
+    # IW620 (1286:2059) and MediaTek (0e8d:3603/3605) Bluetooth. On the
+    # MediaTek devices, 99-ps5-bt-phantom.rules deauthorizes interfaces 3 and 4.
     for device in /sys/bus/usb/devices/*; do
         case "$(cat "$device/idVendor" 2>/dev/null):$(cat "$device/idProduct" 2>/dev/null)" in
             1286:2059|0e8d:*) ;;
@@ -218,7 +219,7 @@ scrub() {
         done
     done
     dmesg --color=never 2>&1 | \
-        grep -Ei 'Bluetooth|btusb|btmtk|hci[0-9]|1286|2059|0e8d|3603|PS5: using bulk OUT|opcode|xhci|usb.*disconnect|error -[0-9]+' | \
+        grep -Ei 'Bluetooth|btusb|btmtk|hci[0-9]|1286|2059|0e8d|3603|3605|PS5: using bulk OUT|opcode|xhci|usb.*disconnect|error -[0-9]+' | \
         tail -n 160 || true
 
     echo
@@ -267,6 +268,10 @@ scrub() {
     else
         echo "performance opt-out: absent"
     fi
+    # A readable sysfs attribute can still block in a wedged driver. Each read
+    # is bounded below, and this outer limit keeps their aggregate below the
+    # boot-report service's overall deadline.
+    timeout 30 sh <<'PS5_SYSFS' || echo "sysfs telemetry timed out after 30 seconds"
     for module in k10temp ps5_cpufreq ps5_gpufreq; do
         if [ -d "/sys/module/$module" ]; then
             printf 'module %s loaded\n' "$module"
@@ -316,6 +321,7 @@ scrub() {
                 "$(timeout 2 cat "$card/device/$attr" 2>/dev/null | tr '\n' ' ')"
         done
     done
+PS5_SYSFS
 
     echo
     echo "[session-and-sleep]"

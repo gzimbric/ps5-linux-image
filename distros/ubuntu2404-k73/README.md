@@ -2,14 +2,15 @@
 
 Ubuntu 24.04 LTS desktop for regular PS5 consoles (fat and slim), plus an
 experimental PS5 Pro path, on firmware 11.xx and 13.xx. It uses shared
-Linux 7.3.0 kernel build #6 and is built by
+Linux 7.3.0 kernel build #7 and is built by
 `.github/workflows/ubuntu2404-k73-image.yml` as a draft prerelease named
 `ubuntu2404-k73-image-N`.
 
 **Status:** tester build. The regular-console path inherits the drivers and
 services tested in CachyOS Image 4 on 11.60. On one PS5 Pro on 11.60, Image 3
 reached the desktop at 1080p over HDMI with wired SSH, Wi-Fi and USB input
-working. Bluetooth on Pro doesn't work yet. This is one image for both:
+working. Bluetooth on Pro is not hardware-verified; the current source has an
+untested extension for its controller. This is one image for both:
 the kernel includes only the Pro-specific GPU delta from rmux commit
 `55161c0`, Linux 7.3's `mt7925e`, and the exact MT7925 Wi-Fi/Bluetooth
 firmware. The regular-only CPU/GPU frequency modules are skipped on Pro.
@@ -82,17 +83,17 @@ Raspberry Pi Imager can flash the `.img.xz` directly.
 
 | Piece | Where it comes from |
 | --- | --- |
-| Kernel | `linux-ps5 7.3.0-6`, kernel build #6: Linux v7.3 with rmux's 7.3 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at `36f173f`) plus only the Pro GPU delta from `55161c0`, without repinning. CPU/GPU frequency drivers are modules, VCN firmware is built in, and `MT7921E=m` plus `MT7925E=m`. Made into a `.deb` from the shared k73 kernel bundle by `scripts/package-linux-ps5-k73-deb.sh`. |
-| Bluetooth patches | VivaLaVent's IW620 btusb quirks fix from ps5-bazzite-deck v1.0.3, and from v1.0.4 WizGery's bulk OUT endpoint fix for the MediaTek controller (USB `0e8d:3603`) plus an L2CAP change that answers "pending" when a connection request beats the encryption change event. The patches are in `distros/cachyos1160-k73/kernel`, shared with the CachyOS image. |
+| Kernel | `linux-ps5 7.3.0-7`, kernel build #7: Linux v7.3 with rmux's 7.3 patch set ([rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1) at `36f173f`) plus only the Pro GPU delta from `55161c0`, without repinning. CPU/GPU frequency drivers are modules, VCN firmware is built in, and `MT7921E=m` plus `MT7925E=m`. Made into a `.deb` from the shared k73 kernel bundle by `scripts/package-linux-ps5-k73-deb.sh`. |
+| Bluetooth patches | VivaLaVent's IW620 btusb quirks fix from ps5-bazzite-deck v1.0.3, and from v1.0.4 WizGery's bulk OUT endpoint fix for the regular MediaTek controller (USB `0e8d:3603`) plus an L2CAP change that answers "pending" when a connection request beats the encryption change event. The bulk endpoint selection also covers the Pro's `0e8d:3605`, whose captured descriptors have the same two bulk OUT endpoints. That extension is source-only and untested on hardware. The patches are in `distros/cachyos1160-k73/kernel`, shared with the CachyOS image. |
 | IW620 Wi-Fi | mlan/moal from ps5-linux-mwifiex `4bce848` with the 7.3 compatibility patch, built against the same kernel tree and shipped in the `linux-ps5` package under `/usr/lib/modules/7.3.0/updates/ps5-iw620`. `ps5-iw620-firmware.service` copies the loader's firmware dump from `/boot/efi/lib/nxp/` and loads the driver. |
 | MediaTek Wi-Fi | Linux 7.3's `mt7921e` for regular consoles and `mt7925e` for Pro, loaded only by their PCI IDs. The regular firmware comes from Ubuntu's `linux-firmware`; the three Pro Wi-Fi/Bluetooth files are installed and SHA-256 checked from the same pinned linux-firmware revision used by the image build. |
-| MediaTek Bluetooth | `99-ps5-bt-phantom.rules` turns off interfaces 3 and 4 of `0e8d:3603` (a phantom second controller) and keeps the device out of autosuspend. The rule is in the initramfs too, so those interfaces are off before btusb can load. `btusb-ps5.conf` sets `enable_autosuspend=0` for every btusb controller, the IW620 included (as in Bazzite Deck v1.0.4). |
+| MediaTek Bluetooth | `99-ps5-bt-phantom.rules` turns off interfaces 3 and 4 of `0e8d:3603` and `0e8d:3605` (a phantom second controller) and keeps either device out of autosuspend. The rule is in the initramfs too, so those interfaces are off before btusb can load. `btusb-ps5.conf` sets `enable_autosuspend=0` for every btusb controller, the IW620 included (as in Bazzite Deck v1.0.4). The `3605` path is not hardware-verified. |
 | NetworkManager | `zz-ps5-iw620.conf`: no scan MAC randomization, the permanent MAC, power saving off. It is named to sort after Ubuntu's `default-wifi-powersave-on.conf`. |
 | BlueZ | Pairable, Just Works repairing and the userspace HID path, as in Image 4. |
 | Fan and clocks | `ps5fan.service` sets a 65 C target for the ICC's automatic fan control (`/etc/default/ps5-fan`); `ps5-performance.service` then loads the GPU and CPU frequency drivers on regular consoles. It detects either Pro GPU ID and leaves those unvalidated frequency modules unloaded on Pro. |
 | Display | amdgpu `dpm=0 gpu_recovery=0 force_1080p=1` and the eight Cyan Skillfish 2 firmware files in the initramfs, `consoleblank=0`, no `video=`. On Pro, the kernel also supplies the 13DC ID, 16-CU geometry, nine golden registers, DCN 2.01 classification and the Pro CLK4 offset. |
 | Kernel updates | apt holds `linux-ps5`. See below. |
-| Boot report | `ps5-boot-report.txt` on the boot partition, 35 seconds after boot. |
+| Boot report | `ps5-boot-report.txt` on the boot partition, 35 seconds after boot. Individual hardware probes are bounded, sysfs telemetry has a 30-second aggregate cap, and the service has a 120-second overall limit. The serialized inner timeout ceilings total 90 seconds. |
 
 `systemd-networkd-wait-online` and the Linux sleep targets are masked.
 
@@ -129,10 +130,16 @@ the end of the line in `cmdline.txt`. That turns Bluetooth off and leaves
 Wi-Fi working. `btusb.ps5_tx_ep=0` keeps btusb but goes back to the stock
 endpoint. Please report either case with `ps5-boot-report.txt`.
 
-On PS5 Pro, Wi-Fi through `mt7925e` worked on the one console tested.
-Bluetooth doesn't work yet. The Pro's controller is USB `0e8d:3605`, which
-has the same two-controller layout as `0e8d:3603`, but the phantom-interface
-rule only covers `0e8d:3603` so far. The boot report records the detected
+On PS5 Pro, Wi-Fi through `mt7925e` worked on the one console tested. Its
+Bluetooth controller is USB `0e8d:3605`. Captured descriptors show the same
+five-interface, two-controller layout as `0e8d:3603`, and the failed boot
+showed both controllers binding before firmware setup timed out and the USB
+device reset. This source now deauthorizes the second function (interfaces 3
+and 4) before btusb loads and selects bulk OUT endpoint `0x02` for the primary
+function. That is a source-only fix inferred from the captured layout, not a
+successful Bluetooth test. Keep `module_blacklist=btusb` available for the
+first boot, and do not describe Pro Bluetooth as working until a controller
+pairs and reconnects after a cold boot. The boot report records the detected
 MediaTek PCI ID, module binding, firmware messages and Bluetooth USB IDs.
 
 ## If the display does not come up
@@ -194,9 +201,9 @@ On an x86_64 Linux machine with Docker:
 ./scripts/build-linux-ps5-k73.sh
 sudo ./scripts/package-linux-ps5-k73.sh
 ./scripts/package-linux-ps5-k73-deb.sh
-sudo ./scripts/build-ubuntu2404-k73-image.sh --deb linux-bin/ubuntu2404-k73/linux-ps5_7.3.0-6_amd64.deb
+sudo ./scripts/build-ubuntu2404-k73-image.sh --deb linux-bin/ubuntu2404-k73/linux-ps5_7.3.0-7_amd64.deb
 sudo ./scripts/verify-ubuntu2404-k73-image.sh --image output/ps5-ubuntu2404-k73.img \
-  --deb linux-bin/ubuntu2404-k73/linux-ps5_7.3.0-6_amd64.deb
+  --deb linux-bin/ubuntu2404-k73/linux-ps5_7.3.0-7_amd64.deb
 ```
 
 The first command needs a case-sensitive filesystem for its output.

@@ -5,7 +5,8 @@ After=local-fs.target NetworkManager.service ssh.service ps5fan.service ps5-amdg
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/ps5-boot-report
-TimeoutStartSec=60
+# The script's serialized inner timeout ceilings total 90 seconds.
+TimeoutStartSec=120
 TimeoutStopSec=5
 Nice=10
 IOSchedulingClass=idle

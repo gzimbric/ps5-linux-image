@@ -45,8 +45,8 @@ BLUEZ_MAIN_CONF_SHA256=d3762eb24785530885ffa51fffc81b078f5bb362d83cf2462989dbb6b
 BLUEZ_INPUT_CONF_SHA256=d85aa14cab44a058d1ae13a0774961d011da735b49ae4d6546e2cc2e396c6d3d
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-4"
-PACKAGE_FILE=linux-ps5-7.3.0-4-x86_64.pkg.tar.zst
+NEW_PACKAGE="linux-ps5 7.3.0-5"
+PACKAGE_FILE=linux-ps5-7.3.0-5-x86_64.pkg.tar.zst
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
 MT7921E_MODULE=kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko
 MT7921E_ALIASES=(
@@ -760,8 +760,8 @@ altered=$(sed -nE 's#^(warning|error): linux-ps5: /([^ ]+) .*#\2#p' <<<"$qkk" | 
 unexpected=$(grep -vE "^usr/lib/modules/$KVER/modules\.[a-z.]+$" <<<"$altered" || true)
 [[ -z $unexpected ]] || die "linux-ps5 files changed after installation: ${unexpected//$'\n'/ }"
 echo "ok  pacman -Qkk linux-ps5: $(grep -c . <<<"$altered" || true) module index files rewritten by depmod"
-package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-4/files" > "$work/package-new.paths"
-echo "linux-ps5 7.3.0-4 owns $(wc -l < "$work/package-new.paths") paths"
+package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-5/files" > "$work/package-new.paths"
+echo "linux-ps5 7.3.0-5 owns $(wc -l < "$work/package-new.paths") paths"
 
 expect_sha "$R/etc/mkinitcpio.conf" "$MKINITCPIO_CONF_SHA256" "/etc/mkinitcpio.conf (unchanged)"
 umount_all
