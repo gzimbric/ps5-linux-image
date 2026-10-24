@@ -354,8 +354,10 @@ ps5-bazzite-deck v1.0.4, and the Pro-only GPU delta ported onto the pinned 7.3
 patch set. The same image includes the in-tree MT7925 driver and pinned Pro
 Wi-Fi/Bluetooth firmware; regular-only frequency modules are skipped on Pro.
 `.github/workflows/ubuntu2404-k73-image.yml` builds it and makes a
-draft prerelease named `ubuntu2404-k73-image-N`; no image from it has been
-booted on Pro yet. See the [profile README](distros/ubuntu2404-k73/README.md).
+draft prerelease named `ubuntu2404-k73-image-N`. Image 3 reached the desktop
+on one PS5 Pro on 11.60 with
+[Pro Linux test 3](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-pro-linux-test-3).
+See the [profile README](distros/ubuntu2404-k73/README.md).
 
 ## Prerequisites
 

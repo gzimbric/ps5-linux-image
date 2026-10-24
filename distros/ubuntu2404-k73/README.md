@@ -7,9 +7,9 @@ Linux 7.3.0 kernel build #6 and is built by
 `ubuntu2404-k73-image-N`.
 
 **Status:** tester build. The regular-console path inherits the drivers and
-services tested in CachyOS Image 4 on 11.60. The PS5 Pro loader/HV path and
-kernel-text access were proved separately, but Linux boot, display, Wi-Fi and
-Bluetooth on Pro still need hardware testing. This is one image for both:
+services tested in CachyOS Image 4 on 11.60. On one PS5 Pro on 11.60, Image 3
+reached the desktop at 1080p over HDMI with wired SSH, Wi-Fi and USB input
+working. Bluetooth on Pro doesn't work yet. This is one image for both:
 the kernel includes only the Pro-specific GPU delta from rmux commit
 `55161c0`, Linux 7.3's `mt7925e`, and the exact MT7925 Wi-Fi/Bluetooth
 firmware. The regular-only CPU/GPU frequency modules are skipped on Pro.
@@ -21,7 +21,8 @@ boot-file sizes, for example Sonic's 11.xx/13.xx release or a current
 [ps5-linux-loader](https://github.com/ps5-linux/ps5-linux-loader) build. On
 an IW620 console, use a build that passes the Wi-Fi firmware to Linux.
 PS5 Pro additionally needs a loader with the validated Pro HV path; a
-regular-console ELF is not a substitute.
+regular-console ELF is not a substitute. On 11.60 that is
+[Pro Linux test 3](https://github.com/gzimbric/ps5-linux-loader/releases/tag/firmware-11.60-pro-linux-test-3).
 
 Loader builds that need exact boot-file sizes, such as the 11.60 builds used
 with the Ubuntu 24.04 7.1.7 image (`firmware-11.60-dma-e820-run18`, the
@@ -37,6 +38,11 @@ that `bzImage` is a relocatable boot protocol 2.15 kernel built with KASLR,
 that `bzImage` and `initrd.img` together stay under 160 MiB, and that
 `cmdline.txt` has no `nokaslr`, `mem=` or `memmap=`. Keep it that way when
 you edit `cmdline.txt`.
+
+`cmdline.txt` sets `usbcore.autosuspend=-1`. The PS5 Pro's two USB
+controllers can't come back once runtime power management suspends them, so
+without it some USB ports stop working a few minutes after boot. Image 3 was
+built before this change, so Pro testers on Image 3 add it by hand.
 
 `kexec.sh` is the official image's file, unchanged, but it is not expected
 to work with this kernel. The last commit of rmux's fork turns the Salina
@@ -105,7 +111,8 @@ Raspberry Pi Imager can flash the `.img.xz` directly.
 
 Nothing in the image is firmware-specific, but the regular-console base has
 only been booted on 11.60 (as kernel #4 in CachyOS Image 4, before the
-MediaTek Bluetooth patches), while the Pro Linux path and 13.xx are untested.
+MediaTek Bluetooth patches). The Pro Linux path has booted on one Pro on
+11.60, and 13.xx is untested.
 The one place the firmware showed was
 the IW620 firmware the loader dumps: 498108 bytes on 11.xx and 500296 bytes
 on 13.xx. `ps5-iw620-firmware` accepts both (and the older loader sizes),
@@ -122,9 +129,11 @@ the end of the line in `cmdline.txt`. That turns Bluetooth off and leaves
 Wi-Fi working. `btusb.ps5_tx_ep=0` keeps btusb but goes back to the stock
 endpoint. Please report either case with `ps5-boot-report.txt`.
 
-On PS5 Pro, `mt7925e` and its required firmware are present, but that path is
-still a first-boot test. The boot report records the detected MediaTek PCI
-ID, module binding, firmware messages and Bluetooth USB IDs.
+On PS5 Pro, Wi-Fi through `mt7925e` worked on the one console tested.
+Bluetooth doesn't work yet. The Pro's controller is USB `0e8d:3605`, which
+has the same two-controller layout as `0e8d:3603`, but the phantom-interface
+rule only covers `0e8d:3603` so far. The boot report records the detected
+MediaTek PCI ID, module binding, firmware messages and Bluetooth USB IDs.
 
 ## If the display does not come up
 
