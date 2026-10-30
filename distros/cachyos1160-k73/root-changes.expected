@@ -1,7 +1,7 @@
 # Every root filesystem (p1) change scripts/build-cachyos1160-k73-image.sh is
 # allowed to make to the official ps5-cachyos image, apart from the kernel
 # package swap. The build compares full before/after file manifests of the
-# root partition. Paths owned by linux-ps5 7.1.7-1 or 7.3.0-4 are the kernel
+# root partition. Paths owned by linux-ps5 7.2.3-1 or 7.3.0-4 are the kernel
 # swap, which pacman checks; every other difference must match this list
 # exactly.
 #
@@ -10,7 +10,7 @@
 # The two Wi-Fi modules and the initramfs are built by the same run, so their
 # sizes and hashes are filled in from that build.
 A boot/initrd.img-7.3.0 f 0600 0 0 @INITRD_SIZE@ @INITRD_SHA256@
-R boot/initrd.img-7.1.7 f 0600 0 0 54367236 ba6dd1d0e69149e6be60bfd655b4bfc8cac0eee546e1ba478f3bdd1240965a56
+R boot/initrd.img-7.2.3 f 0600 0 0 55784225 63cc53e7cc663c83f964f9c29540cd2c275ad77fb6988e2d04127eb5bd2c1a45
 A etc/NetworkManager/conf.d/20-ps5-iw620.conf f 0644 0 0 104 1c521ad4efd0d461fd5c7866a515227cec349a8e041fbe6e5c3ff3e82eb7c5a8
 M etc/bluetooth/input.conf f 0644 0 0 1027 8849018bac82d875b9b150028c25215f63c7a85533fa13de63ef43f3a960d1b5
 M etc/bluetooth/main.conf f 0644 0 0 14843 bc576c3c162636ebf787f2125c422d00352227f089357ed49398941d92a33514
@@ -31,21 +31,18 @@ A etc/systemd/system/hybrid-sleep.target l 0777 0 0 - /dev/null
 A etc/systemd/system/multi-user.target.wants/ps5-amdgpu-reprobe.service l 0777 0 0 - /etc/systemd/system/ps5-amdgpu-reprobe.service
 A etc/systemd/system/multi-user.target.wants/ps5-iw620-firmware.service l 0777 0 0 - /etc/systemd/system/ps5-iw620-firmware.service
 A etc/systemd/system/multi-user.target.wants/ps5-performance.service l 0777 0 0 - /etc/systemd/system/ps5-performance.service
-A etc/systemd/system/multi-user.target.wants/ps5-stage-gpu-firmware.service l 0777 0 0 - /etc/systemd/system/ps5-stage-gpu-firmware.service
 A etc/systemd/system/multi-user.target.wants/ps5fan.service l 0777 0 0 - /etc/systemd/system/ps5fan.service
 A etc/systemd/system/ps5-amdgpu-reprobe.service f 0644 0 0 342 2409fd812118088098ce6b740acb913d872c1df1efdb38e6254d4d388cabe72e
 A etc/systemd/system/ps5-boot-report.service f 0644 0 0 337 7c74af74b087ce85826a1f6ee60ae8cb6d37579b1bdd6ff6528d01f0d9131041
 A etc/systemd/system/ps5-boot-report.timer f 0644 0 0 171 9074e18c67eaec808a8934417573020249d2c3938b8688fb9ef3b36307c04fec
 A etc/systemd/system/ps5-iw620-firmware.service f 0644 0 0 308 8b17666574ea825f1ec6f9ee90410cd6ad35b5a7501a047e6947c28ccf1332d2
 A etc/systemd/system/ps5-performance.service f 0644 0 0 432 3072a2c92e001427e91cee7e6418d5f86a6713d690c382640bf7dff92520732f
-A etc/systemd/system/ps5-stage-gpu-firmware.service f 0644 0 0 346 d1060a4199fd18c27b6ed00d8c5ff47642fd33f07548533a46a9dee08470db11
 A etc/systemd/system/ps5fan.service f 0644 0 0 471 659eaf4c7190b0c8527abfe83aab4c2cd3d4a6adc239c8fe5084c03aa4189a75
 A etc/systemd/system/sleep.target l 0777 0 0 - /dev/null
 A etc/systemd/system/suspend-then-hibernate.target l 0777 0 0 - /dev/null
 A etc/systemd/system/suspend.target l 0777 0 0 - /dev/null
 A etc/systemd/system/timers.target.wants d 0755 0 0 - -
 A etc/systemd/system/timers.target.wants/ps5-boot-report.timer l 0777 0 0 - /etc/systemd/system/ps5-boot-report.timer
-M home/steam/.config/ps5-next-session f 0644 1000 1000 8 e1eb72e080d8498fb7988921455ab4e66cc25cefd4b1a802446ed9e798e18b8b
 M usr/bin/gamescope-session-ps5 f 0755 0 0 1866 d68c1f3a9014dd2db00681b5434f6e951bc6d4ebdebc48ec77fc154dbf2fc687
 A usr/lib/firmware/amdgpu/cyan_skillfish2_ce.bin f 0644 0 0 263296 5946efbf7e46ccfe7e9f965da56c35b1187469d1c1a49c8a9eff433eb3ab4723
 A usr/lib/firmware/amdgpu/cyan_skillfish2_me.bin f 0644 0 0 263424 d4ed4d968de0d7720f7c8215d42fdae727bf99cdf43cee6f8f864dc2584b17e2
@@ -66,5 +63,4 @@ A usr/local/sbin/ps5-boot-report f 0755 0 0 13607 193e2fbf272615649a99472f014d33
 A usr/local/sbin/ps5-iw620-firmware f 0755 0 0 2032 b3a4333090cfb09f55bc6a8ad44810b0a66d50f6d369293e7ad4a09231d27bef
 A usr/local/sbin/ps5-fan-target f 0755 0 0 747 3c7d73beb68513f925e884a951d5ddbedc0061e9fa307db6b89208c4c129cc01
 A usr/local/sbin/ps5-performance f 0755 0 0 3668 2f0165f55766efb8dff74e425d73c15f8d7dcd64f9a7ac22badda3ac4f253c32
-A usr/local/sbin/ps5-stage-gpu-firmware f 0755 0 0 2221 17dcc1127068734c8e6e24c7ca8efe6d06cb9dcb8a9caaa6eefe9359d46ba161
 A usr/local/sbin/ps5-update-boot-files f 0755 0 0 6803 0bcca7755296c2a444da904befd9b650839e0bdeeef330e301192cbece7189e8

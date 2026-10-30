@@ -802,11 +802,15 @@ awk -v swap="$work/kernel-swap" -v rest="$work/profile-changes" \
 touch "$work/kernel-swap" "$work/profile-changes"
 
 # Files of the old package still on disk must be shared directories, owned by
-# the new package too, or the Bluetooth helper put back above.
+# the new package too, or one of the Bluetooth/Pro helpers deliberately put
+# back above from the reviewed profile.
 leftover=$(comm -23 <(sort -u "$work/package-old.paths") <(sort -u "$work/package-new.paths") |
   awk -F'\t' 'NR == FNR { keep[$1] = 1; next } $1 in keep && $2 != "d" { print $1 }' - "$work/root-after.tsv" |
   grep -vxF -e usr/local/sbin/ps5-bt-quiet -e etc/systemd/system/ps5-bt-quiet.service \
-    -e etc/systemd/system/multi-user.target.wants/ps5-bt-quiet.service || true)
+    -e etc/systemd/system/multi-user.target.wants/ps5-bt-quiet.service \
+    -e usr/local/sbin/ps5-stage-gpu-firmware \
+    -e etc/systemd/system/ps5-stage-gpu-firmware.service \
+    -e etc/systemd/system/multi-user.target.wants/ps5-stage-gpu-firmware.service || true)
 [[ -z $leftover ]] || die "files of $OLD_PACKAGE were left behind: ${leftover//$'\n'/ }"
 
 sed -e '/^#/d' -e '/^$/d' \
