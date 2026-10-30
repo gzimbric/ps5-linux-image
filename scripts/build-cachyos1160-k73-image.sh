@@ -344,13 +344,61 @@ layout=$(partx -g -o NR,START,SECTORS -- "$PARTIAL" | awk '{ print $1, $2, $3 }'
 echo "ok  p1 $P1_START+$P1_SECTORS, p2 $P2_START+$P2_SECTORS  partition table"
 
 p2_sha=$(region_sha "$P2_START" "$P2_SECTORS")
-[[ $p2_sha == "$P2_SHA256" ]] ||
-  die "p2 (FAT) sha256 $p2_sha, expected $P2_SHA256"
-echo "ok  $P2_SHA256  p2 region before changes"
 p1_sha=$(region_sha "$P1_START" "$P1_SECTORS")
-[[ $p1_sha == "$P1_SHA256" ]] ||
-  die "p1 (root) sha256 $p1_sha, expected $P1_SHA256"
-echo "ok  $P1_SHA256  p1 region before changes"
+region_mismatch=0
+if [[ $p2_sha == "$P2_SHA256" ]]; then
+  echo "ok  $P2_SHA256  p2 region before changes"
+else
+  echo "ERROR: p2 (FAT) sha256 $p2_sha, expected $P2_SHA256" >&2
+  region_mismatch=1
+fi
+if [[ $p1_sha == "$P1_SHA256" ]]; then
+  echo "ok  $P1_SHA256  p1 region before changes"
+else
+  echo "ERROR: p1 (root) sha256 $p1_sha, expected $P1_SHA256" >&2
+  region_mismatch=1
+fi
+
+# A mutable upstream URL can legitimately move to a newer official image.
+# When that happens, inventory the untrusted candidate read-only before
+# stopping so all provenance pins can be reviewed from one CI run. Nothing
+# from this diagnostic mount is copied into the output image.
+if ((region_mismatch)); then
+  log "Read-only candidate base inventory"
+  attach CANDIDATE_P1_DEV "$P1_START" "$P1_SECTORS"
+  attach CANDIDATE_P2_DEV "$P2_START" "$P2_SECTORS"
+  mount_at "$M" -t ext4 -o ro,noload "$CANDIDATE_P1_DEV"
+  printf 'pacman: '
+  chroot "$M" /usr/bin/pacman -Q linux-ps5 || true
+  for path in etc/mkinitcpio.conf etc/bluetooth/main.conf \
+    etc/bluetooth/input.conf boot/vmlinuz-* boot/initrd.img-*; do
+    for file in "$M"/$path; do
+      [[ -f $file ]] || continue
+      printf 'root  %s  %s\n' "$(sha "$file")" "${file#"$M"/}"
+    done
+  done
+  find "$M/var/lib/pacman/local" -maxdepth 1 -type d -name 'linux-ps5-*' \
+    -printf 'pacman-db  %f\n' | sort
+  for path in usr/local/sbin/ps5-stage-gpu-firmware \
+    etc/systemd/system/ps5-stage-gpu-firmware.service \
+    etc/systemd/system/multi-user.target.wants/ps5-stage-gpu-firmware.service; do
+    if [[ -L $M/$path ]]; then
+      printf 'root-link  %s -> %s\n' "$path" "$(readlink "$M/$path")"
+    elif [[ -f $M/$path ]]; then
+      printf 'root-extra  %s  %s\n' "$(sha "$M/$path")" "$path"
+    else
+      printf 'root-missing  %s\n' "$path"
+    fi
+  done
+  umount_all
+  mount_at "$M" -t vfat -o ro "$CANDIDATE_P2_DEV"
+  while IFS= read -r -d '' file; do
+    printf 'fat  %s  %s bytes  %s\n' "$(sha "$file")" \
+      "$(stat -c %s -- "$file")" "${file#"$M"/}"
+  done < <(find "$M" -type f -print0 | sort -z)
+  umount_all
+  die "candidate base partition hashes do not match the reviewed pins"
+fi
 
 # ----------------------------------------------------- partitions, before
 
