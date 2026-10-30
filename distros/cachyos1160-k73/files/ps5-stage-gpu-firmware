@@ -1,0 +1,65 @@
+#!/bin/sh
+# Stage PS5 Pro (Viola) GPU firmware dumped by ps5-linux-loader. The image
+# deliberately keeps ps5_viola_fw=0, so this prepares a complete, validated
+# firmware set for controlled testing without selecting it automatically.
+set -eu
+
+BOOT=/boot/efi
+SRC=$BOOT/lib/firmware/amdgpu
+DST=/usr/lib/firmware/amdgpu
+STAMP=/var/lib/ps5-stage-gpu-firmware/deployed
+NAMES="viola_ce.bin viola_me.bin viola_mec.bin viola_mec2.bin viola_pfp.bin viola_rlc.bin viola_sdma.bin viola_sdma1.bin"
+
+log() { printf 'ps5-stage-gpu-firmware: %s\n' "$*"; }
+
+# rmux's Pro branch publishes both Viola IDs; current retail reports 13da.
+pro=
+for d in /sys/bus/pci/devices/*; do
+    ids=$(cat "$d/vendor" "$d/device" 2>/dev/null | tr '\n' : || true)
+    case $ids in
+        0x1002:0x13da:|0x1002:0x13dc:) pro=1; break ;;
+    esac
+done
+[ -n "$pro" ] || { log "not a PS5 Pro"; exit 0; }
+
+mountpoint -q "$BOOT" || { log "$BOOT is not mounted"; exit 1; }
+[ -w "$BOOT" ] || { log "$BOOT is not writable"; exit 1; }
+
+missing=
+for name in $NAMES; do
+    [ -s "$SRC/$name" ] || missing="$missing $name"
+done
+[ -z "$missing" ] || { log "loader did not dump:$missing"; exit 0; }
+
+kver=$(uname -r)
+modinfo -k "$kver" -F firmware amdgpu 2>/dev/null |
+    grep -qx 'amdgpu/viola_ce.bin' || {
+        log "amdgpu for $kver does not advertise Viola firmware"
+        exit 0
+    }
+
+state="$kver $(cd "$SRC" && sha256sum $NAMES | sha256sum | cut -d' ' -f1)"
+if [ "$(cat "$STAMP" 2>/dev/null || true)" = "$state" ]; then
+    log "Viola firmware is already staged for $kver"
+    exit 0
+fi
+
+mkdir -p "$DST"
+trap 'for name in $NAMES; do rm -f "$DST/.$name.new"; done' EXIT
+for name in $NAMES; do
+    install -m 0644 "$SRC/$name" "$DST/.$name.new"
+done
+for name in $NAMES; do
+    mv -f "$DST/.$name.new" "$DST/$name"
+done
+trap - EXIT
+log "copied all eight Viola firmware files"
+
+# This image's updater builds with mkinitcpio, checks all required firmware,
+# enforces the bounded loader size limit and deploys atomically to the FAT
+# partition while retaining the previous bzImage/initrd pair.
+/usr/local/sbin/ps5-update-boot-files
+
+mkdir -p "${STAMP%/*}"
+printf '%s\n' "$state" > "$STAMP"
+log "staged, but ps5_viola_fw=0 keeps Cyan firmware selected by default"

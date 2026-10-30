@@ -43,8 +43,8 @@ BLUEZ_MAIN_CONF_SHA256=d3762eb24785530885ffa51fffc81b078f5bb362d83cf2462989dbb6b
 BLUEZ_INPUT_CONF_SHA256=d85aa14cab44a058d1ae13a0774961d011da735b49ae4d6546e2cc2e396c6d3d
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-3"
-PACKAGE_FILE=linux-ps5-7.3.0-3-x86_64.pkg.tar.zst
+NEW_PACKAGE="linux-ps5 7.3.0-4"
+PACKAGE_FILE=linux-ps5-7.3.0-4-x86_64.pkg.tar.zst
 IW620_ALIAS='pci:v00001B4Bd00002B56sv*sd*bc*sc*i*'
 
 # The FAT partition holds these five files. bzImage and initrd.img come from
@@ -170,6 +170,7 @@ for f in README.md cmdline.txt root-changes.expected config/ps5-amdgpu.conf \
   files/ps5fan.service \
   files/ps5-iw620.conf files/ps5-iw620-firmware files/ps5-iw620-firmware.service \
   files/20-ps5-iw620.conf files/ps5-performance files/ps5-performance.service \
+  files/ps5-stage-gpu-firmware files/ps5-stage-gpu-firmware.service \
   files/ps5-bt-quiet files/ps5-bt-quiet.service \
   files/ps5-1160-check-boot-files files/ps5-update-boot-files \
   files/05-ps5-boot-files-precheck.hook files/95-ps5-boot-files.hook; do
@@ -539,6 +540,12 @@ add_file 0644 "$PROFILE/files/ps5-performance.service" \
   etc/systemd/system/ps5-performance.service
 add_link /etc/systemd/system/ps5-performance.service \
   etc/systemd/system/multi-user.target.wants/ps5-performance.service
+add_file 0755 "$PROFILE/files/ps5-stage-gpu-firmware" \
+  usr/local/sbin/ps5-stage-gpu-firmware
+add_file 0644 "$PROFILE/files/ps5-stage-gpu-firmware.service" \
+  etc/systemd/system/ps5-stage-gpu-firmware.service
+add_link /etc/systemd/system/ps5-stage-gpu-firmware.service \
+  etc/systemd/system/multi-user.target.wants/ps5-stage-gpu-firmware.service
 
 log "First-boot defaults (hostname ps5, UTC)"
 add_file 0644 "$PROFILE/files/hostname" etc/hostname
@@ -603,6 +610,7 @@ in_root systemd-analyze verify \
   /etc/systemd/system/ps5fan.service \
   /etc/systemd/system/ps5-amdgpu-reprobe.service \
   /etc/systemd/system/ps5-performance.service \
+  /etc/systemd/system/ps5-stage-gpu-firmware.service \
   /etc/systemd/system/ps5-iw620-firmware.service \
   /etc/systemd/system/ps5-bt-quiet.service \
   /etc/systemd/system/ps5-boot-report.service \
@@ -665,8 +673,8 @@ altered=$(sed -nE 's#^(warning|error): linux-ps5: /([^ ]+) .*#\2#p' <<<"$qkk" | 
 unexpected=$(grep -vE "^usr/lib/modules/$KVER/modules\.[a-z.]+$" <<<"$altered" || true)
 [[ -z $unexpected ]] || die "linux-ps5 files changed after installation: ${unexpected//$'\n'/ }"
 echo "ok  pacman -Qkk linux-ps5: $(grep -c . <<<"$altered" || true) module index files rewritten by depmod"
-package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-3/files" > "$work/package-new.paths"
-echo "linux-ps5 7.3.0-3 owns $(wc -l < "$work/package-new.paths") paths"
+package_paths "$R/var/lib/pacman/local/linux-ps5-7.3.0-4/files" > "$work/package-new.paths"
+echo "linux-ps5 7.3.0-4 owns $(wc -l < "$work/package-new.paths") paths"
 
 expect_sha "$R/etc/mkinitcpio.conf" "$MKINITCPIO_CONF_SHA256" "/etc/mkinitcpio.conf (unchanged)"
 umount_all

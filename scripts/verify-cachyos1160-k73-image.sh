@@ -18,7 +18,7 @@ shopt -s inherit_errexit
 export LC_ALL=C
 
 KVER=7.3.0
-NEW_PACKAGE="linux-ps5 7.3.0-3"
+NEW_PACKAGE="linux-ps5 7.3.0-4"
 IMAGE_SIZE=12582912000
 P1_START=1024000 P1_SECTORS=23549952
 P2_START=2048 P2_SECTORS=1021952
@@ -121,8 +121,8 @@ ok "bzImage: $version"
 # ------------------------------------------------------------------ kernel
 
 db=$(cd -- "$R/var/lib/pacman/local" && find . -mindepth 1 -maxdepth 1 -name 'linux-ps5-*' -printf '%P\n')
-[[ $db == linux-ps5-7.3.0-3 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
-[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-3 ]] ||
+[[ $db == linux-ps5-7.3.0-4 ]] || die "installed linux-ps5: ${db//$'\n'/ }"
+[[ $(sed -n '/^%VERSION%$/{n;p}' "$R/var/lib/pacman/local/$db/desc") == 7.3.0-4 ]] ||
   die "pacman database does not say $NEW_PACKAGE"
 modules=$(cd -- "$R/usr/lib/modules" && find . -mindepth 1 -maxdepth 1 -printf '%P\n')
 [[ $modules == "$KVER" ]] || die "kernel module trees: ${modules//$'\n'/ }"
@@ -203,7 +203,15 @@ grep -qF 'modprobe ps5_gpufreq' "$R/usr/local/sbin/ps5-performance" ||
   die "ps5-performance does not load the GPU driver first"
 grep -qF 'modprobe ps5_cpufreq' "$R/usr/local/sbin/ps5-performance" ||
   die "ps5-performance does not load the CPU driver"
+grep -qF '0x13da|0x13dc' "$R/usr/local/sbin/ps5-performance" ||
+  die "ps5-performance does not leave Pro clocks to firmware"
 ok "ps5-cpufreq and ps5-gpufreq installed, absent from early-load paths, guarded startup installed"
+grep -qx 'options amdgpu dpm=0 gpu_recovery=0 ps5_viola_fw=0' \
+  "$R/etc/modprobe.d/ps5-amdgpu.conf" ||
+  die "ps5-amdgpu.conf does not enable the safe Pro/display defaults"
+! grep -qw force_1080p "$R/etc/modprobe.d/ps5-amdgpu.conf" ||
+  die "ps5-amdgpu.conf still forces 1080p"
+ok "amdgpu: 4K modes permitted, Viola firmware opt-in only"
 
 # --------------------------------------------------------------- initramfs
 
@@ -231,6 +239,7 @@ w=$R/etc/systemd/system
 for link in multi-user.target.wants/ps5fan.service \
   multi-user.target.wants/ps5-amdgpu-reprobe.service \
   multi-user.target.wants/ps5-performance.service \
+  multi-user.target.wants/ps5-stage-gpu-firmware.service \
   multi-user.target.wants/ps5-iw620-firmware.service \
   multi-user.target.wants/ps5-bt-quiet.service \
   multi-user.target.wants/sshd.service \
@@ -245,13 +254,14 @@ for target in sleep suspend hibernate hybrid-sleep suspend-then-hibernate; do
 done
 [[ -z $(find "$w" "$R/usr/lib/systemd/system" -name 'ps5-stage-firmware*' -print) ]] ||
   die "the 7.1.7 package's ps5-stage-firmware is still installed"
-for f in ps5-boot-report ps5-amdgpu-reprobe ps5-1160-check-boot-files ps5-update-boot-files; do
+for f in ps5-boot-report ps5-amdgpu-reprobe ps5-1160-check-boot-files \
+  ps5-update-boot-files ps5-stage-gpu-firmware; do
   same "$R/usr/local/sbin/$f" "$PROFILE/files/$f" "/usr/local/sbin/$f"
 done
 same "$R/usr/local/sbin/ps5-fan-target" "$PROFILE/files/ps5-fan-target" \
   "/usr/local/sbin/ps5-fan-target"
 same "$R/etc/default/ps5-fan" "$PROFILE/files/ps5-fan.conf" "/etc/default/ps5-fan"
-for f in ps5fan ps5-amdgpu-reprobe ps5-performance \
+for f in ps5fan ps5-amdgpu-reprobe ps5-performance ps5-stage-gpu-firmware \
   ps5-iw620-firmware ps5-bt-quiet \
   ps5-boot-report; do
   same "$R/etc/systemd/system/$f.service" "$PROFILE/files/$f.service" \
@@ -302,6 +312,7 @@ unshare --net chroot "$R" /usr/bin/env -i PATH=/usr/bin LC_ALL=C \
     /etc/systemd/system/ps5fan.service \
     /etc/systemd/system/ps5-amdgpu-reprobe.service \
     /etc/systemd/system/ps5-performance.service \
+    /etc/systemd/system/ps5-stage-gpu-firmware.service \
     /etc/systemd/system/ps5-iw620-firmware.service \
     /etc/systemd/system/ps5-bt-quiet.service \
     /etc/systemd/system/ps5-boot-report.service \

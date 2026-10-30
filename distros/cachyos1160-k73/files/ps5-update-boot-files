@@ -94,13 +94,23 @@ check_initramfs() { # initramfs
     grep -qxF "usr/lib/firmware/amdgpu/cyan_skillfish2_$name.bin" <<<"$contents" ||
       missing+=("cyan_skillfish2_$name.bin")
   done
+  # Once the Pro staging service has copied any Viola file, require the
+  # complete eight-file set in the new initramfs. Never deploy a partial set.
+  viola_present=0
+  compgen -G '/usr/lib/firmware/amdgpu/viola_*.bin' >/dev/null && viola_present=1
+  if ((viola_present)); then
+    for name in ce me mec mec2 pfp rlc sdma sdma1; do
+      grep -qxF "usr/lib/firmware/amdgpu/viola_$name.bin" <<<"$contents" ||
+        missing+=("viola_$name.bin")
+    done
+  fi
   grep -qxF etc/modprobe.d/ps5-amdgpu.conf <<<"$contents" || missing+=(ps5-amdgpu.conf)
   ((${#missing[@]} == 0)) || die "$1 is missing ${missing[*]}"
   if grep -Eq '(^|/)((mlan|moal|ps5-cpufreq|ps5-gpufreq)\.ko(\.zst)?|pcieuartiw620[^/]*)$' \
     <<<"$contents"; then
     die "$1 has the Wi-Fi driver, its firmware or a frequency driver"
   fi
-  echo "$1: amdgpu for $kver, the GPU firmware and ps5-amdgpu.conf, no Wi-Fi or frequency drivers"
+  echo "$1: amdgpu for $kver, complete GPU firmware sets and ps5-amdgpu.conf, no Wi-Fi or frequency drivers"
 }
 
 new_initrd=$initrd

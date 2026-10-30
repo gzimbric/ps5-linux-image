@@ -187,10 +187,10 @@ before posting them because they can contain network details.
 
 | Area | Included behavior |
 |------|-------------------|
-| Kernel | `linux-ps5 7.3.0-3`, mainline v7.3 plus rmux's pinned PS5 patch set |
+| Kernel | `linux-ps5 7.3.0-4`, mainline v7.3 plus rmux's base and the hash-pinned Bazzite v1.8.5 display/Pro stack |
 | Wi-Fi | Updated IW620 driver, staged console firmware, stable NetworkManager MAC behavior and Wi-Fi power saving disabled |
-| Bluetooth | The hash-pinned Bazzite Deck v1.0.3 IW620 `btusb` source correction, rebuilt for this kernel, plus the matching BlueZ policy |
-| CPU/GPU clocks | Guarded GPU-then-CPU scaling at startup; GPU `simple_ondemand`, CPU `schedutil`, CPU boost off |
+| Bluetooth | The hash-pinned Bazzite Deck v1.8.5 IW620 and PS5 Pro `btusb` corrections, rebuilt for this kernel, plus the matching BlueZ policy |
+| CPU/GPU clocks | Guarded GPU-then-CPU scaling on standard PS5; PS5 Pro leaves both clocks to firmware |
 | Cooling | Legacy servo-pattern `3` request before the performance policy; accepted by ICC, but not proof of maximum speed or RPM |
 | Sessions | Plasma on first boot, Steam with `-steamos -gamepadui`, and working legacy session-selector integration |
 | Sleep | Unsupported Linux sleep, suspend and hibernate targets masked |

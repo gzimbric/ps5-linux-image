@@ -1,0 +1,13 @@
+[Unit]
+Description=Stage PS5 Pro Viola GPU firmware (disabled by default)
+After=local-fs.target
+RequiresMountsFor=/boot/efi /usr/lib/firmware /var/lib
+ConditionPathExists=/boot/efi/lib/firmware/amdgpu/viola_rlc.bin
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ps5-stage-gpu-firmware
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

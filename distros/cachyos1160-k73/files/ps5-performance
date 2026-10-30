@@ -37,6 +37,20 @@ contains_word() {
 
 mountpoint -q /boot/efi ||
     die "/boot/efi is not mounted; refusing to load the frequency drivers"
+
+# The Pro's firmware/SMU owns its clocks. The PS5 frequency-driver requests
+# return busy there and can flood the log; Bazzite v1.8.5 guards this in the
+# kernel too. Detect both Viola IDs published by rmux and leave them unloaded.
+for device in /sys/bus/pci/devices/*/device; do
+    [ -r "$device" ] || continue
+    case $(cat "$device") in
+        0x13da|0x13dc)
+            log "PS5 Pro detected; leaving CPU/GPU clocks to firmware"
+            exit 0
+            ;;
+    esac
+done
+
 if [ -e "$OPT_OUT" ]; then
     if [ -d /sys/module/ps5_gpufreq ] || [ -d /sys/module/ps5_cpufreq ]; then
         die "$OPT_OUT is present after a frequency driver was loaded; fully power off"

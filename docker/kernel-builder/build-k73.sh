@@ -12,19 +12,21 @@
 #   /src                 an empty Docker volume for the kernel tree
 #   /out                 output directory
 #
-# The patch set is the 7.3 port by rmux (Armandas Kvietkus) in
-# rmuxnet/ps5-linux-patches-1. A byte-for-byte, hash-pinned follow-up from the
-# ps5-bazzite-deck v1.0.3 release makes the IW620 Bluetooth quirks in that port
-# take effect. The only config change made here is building the two PS5
-# frequency drivers as modules.
+# The base patch set is rmux's 7.3 port. On top of it, the builder applies the
+# exact hash-checked ps5-bazzite-deck v1.8.5 patch order: HDMI 2.1 FRL 4K120,
+# the EDID/link guard and automatic fallback, VRR/display prerequisites, and
+# PS5 Pro GPU/Bluetooth support. A small local follow-up recognizes rmux's
+# second published Viola PCI ID as a Pro too. The two PS5 frequency drivers
+# remain modules, but the Pro guard leaves its clocks to firmware.
 set -euo pipefail
 
 LINUX_COMMIT=c03c1a14507dfaf8b856c2608f9ac216021fc222   # tag v7.3
-PATCHES_COMMIT=36f173f39e5e76c00c4e366a7b909f33bc665ad5
+PATCHES_COMMIT=baee34dbbf9f6b33aca332e9487c5984e345f526
+BAZZITE_COMMIT=96d0c342017968ee2bfc3f56730c9808f2b98342
 KVER=7.3.0
-PATCH_SHA256=b8a238b9973febbcf851053d99195bd7320bb0827c8ee5e4c54eba6b6f7cde3f
-BTUSB_PATCH=/repo/distros/cachyos1160-k73/kernel/ps5-btusb-iw620-quirks.patch
-BTUSB_PATCH_SHA256=c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8
+PATCH_SHA256=fa7b9b6d204a1d16318fa293e0e7e8944d85a435a377d8c0836261c63ad353cf
+BAZZITE_MANIFEST=/repo/distros/cachyos1160-k73/kernel/v1.8.5-patches.sha256
+PRO_13DC_PATCH=/repo/distros/cachyos1160-k73/kernel/ps5-pro-13dc.patch
 CONFIG_SHA256=2294e750518bbfedf9741f5638d81f6308a2fa3839b2e005f5e071224622533d
 VCN_SHA256=bbd15ab65e76178c2918e8224b6ab4ab1711f1b59d935ee131ab188a9712e596
 VCN_SIZE=404544
@@ -34,8 +36,8 @@ CHECK=/repo/distros/cachyos1160-k73/files/ps5-1160-check-boot-files
 # Fixed build identity, so two builds from the same pins match.
 export KBUILD_BUILD_USER=ps5
 export KBUILD_BUILD_HOST=ps5-linux-image
-export KBUILD_BUILD_TIMESTAMP='Sun Oct 18 16:00:53 UTC 2026'
-export KBUILD_BUILD_VERSION=3
+export KBUILD_BUILD_TIMESTAMP='Sat Oct 24 14:21:36 UTC 2026'
+export KBUILD_BUILD_VERSION=4
 export TZ=UTC
 export LC_ALL=C
 export CCACHE_DISABLE=1
@@ -64,22 +66,69 @@ echo "$(uname -m) host, $(x86_64-linux-gnu-gcc --version | head -1), $JOBS jobs"
 
 step "Sources"
 expect_sha256 /ps5-linux-patches/linux.patch "$PATCH_SHA256"
-expect_sha256 "$BTUSB_PATCH" "$BTUSB_PATCH_SHA256"
 expect_sha256 /ps5-linux-patches/.config "$CONFIG_SHA256"
 expect_sha256 /ps5-linux-patches/firmware/amdgpu/ps5_vcn.bin "$VCN_SHA256"
 test "$(stat -c %s /ps5-linux-patches/firmware/amdgpu/ps5_vcn.bin)" = "$VCN_SIZE"
 expect_sha256 /ps5-linux-patches/firmware/LICENSE.amdgpu "$VCN_LICENSE_SHA256"
 test "$(git --git-dir=/in/linux.git rev-parse "$LINUX_COMMIT^{commit}")" = "$LINUX_COMMIT"
+(cd /bazzite-patches && sha256sum -c "$BAZZITE_MANIFEST")
+
+# v1.8.5 was made on rmux's baee34d plus the suspend-to-idle patch. Apply
+# that patch to a writable copy of linux.patch/.config before patching Linux.
+rm -rf /tmp/ps5-linux-patches
+cp -a /ps5-linux-patches /tmp/ps5-linux-patches
+git -C /tmp/ps5-linux-patches apply --check \
+  /bazzite-patches/ps5-linux-patches-pr4-s2idle.patch
+git -C /tmp/ps5-linux-patches apply \
+  /bazzite-patches/ps5-linux-patches-pr4-s2idle.patch
+PS5_PATCHSET=/tmp/ps5-linux-patches
 
 cd /src
 [ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ] || die "/src is not empty"
 git --git-dir=/in/linux.git archive "$LINUX_COMMIT" | tar -xf - -C /src
-git apply --check /ps5-linux-patches/linux.patch
-git apply /ps5-linux-patches/linux.patch
-echo "applied linux.patch ($(grep -c '^diff --git' /ps5-linux-patches/linux.patch) files)"
-git apply --check "$BTUSB_PATCH"
-git apply "$BTUSB_PATCH"
-echo "applied ${BTUSB_PATCH##*/} ($(grep -c '^diff --git' "$BTUSB_PATCH") files)"
+git apply --check "$PS5_PATCHSET/linux.patch"
+git apply "$PS5_PATCHSET/linux.patch"
+echo "applied linux.patch ($(grep -c '^diff --git' "$PS5_PATCHSET/linux.patch") files)"
+
+BAZZITE_PATCHES=(
+  ps5-bluetooth.patch
+  ps5-hdmi-upstream.patch
+  ps5-hdmi-rearm-pr46.patch
+  ps5-hdmi-output-fixes.patch
+  ps5-hdmi-modes.patch
+  ps5-hdmi-debug-log.patch
+  ps5-hdmi-link-lock.patch
+  ps5-gpu-overlay.patch
+  ps5-hdmi-cec-upstream53.patch
+  ps5-hdmi-sleep-mute.patch
+  ps5-hdmi-scdc-source-version.patch
+  ps5-usbc-dp-pr57.patch
+  ps5-hdmi-rgb-full-range.patch
+  ps5-hdmi-edid-fallback.patch
+  ps5-hdmi-edid-keep.patch
+  ps5-hdmi-verde-game-content.patch
+  ps5-hdmi-session-switch.patch
+  ps5-hdmi-rgb-range-encoding.patch
+  ps5-usbc-dp-optin.patch
+  ps5-vrr.patch
+  ps5-vrr-stock-setup.patch
+  ps5-hdmi-frl-4k120.patch
+  ps5-vrr-follow-guard.patch
+  ps5-vrr-min-48.patch
+  ps5-pro-gpu.patch
+  ps5-pro-bluetooth.patch
+  ps5-pro-no-freqdrivers.patch
+  ps5-hdmi-4k120-guard.patch
+)
+for name in "${BAZZITE_PATCHES[@]}"; do
+  patch=/bazzite-patches/$name
+  git apply --check "$patch"
+  git apply "$patch"
+  echo "applied $name ($(grep -c '^--- a/' "$patch") files)"
+done
+git apply --check "$PRO_13DC_PATCH"
+git apply "$PRO_13DC_PATCH"
+echo "applied ${PRO_13DC_PATCH##*/}"
 btusb=drivers/bluetooth/btusb.c
 btusb_table_iw620=$(awk '
   /static const struct usb_device_id btusb_table\[\] = \{/ { in_table = 1 }
@@ -105,7 +154,7 @@ test "$ifnum0_line" -gt "$quirks_lookup_line" ||
   die "btusb BTUSB_IFNUM_0 check still runs before the quirks lookup"
 
 step "Config"
-cp /ps5-linux-patches/.config .config
+cp "$PS5_PATCHSET/.config" .config
 # Build the CPU and GPU frequency drivers as modules. Neither has a module
 # alias, so only the image's guarded startup service can load them explicitly.
 scripts/config --file .config --module X86_PS5_CPUFREQ --module PS5_GPUFREQ
@@ -129,7 +178,7 @@ grep -qx '# CONFIG_MODULE_SIG is not set' .config
 test "$(make -s kernelrelease)" = "$KVER"
 # Everything else should be the published config; show what olddefconfig and
 # the two module switches changed.
-diff /ps5-linux-patches/.config .config > /tmp/config.diff || true
+diff "$PS5_PATCHSET/.config" .config > /tmp/config.diff || true
 cat /tmp/config.diff
 sha256sum .config
 
@@ -186,7 +235,7 @@ cp .config /out/kernel/config
 cp /tmp/config.diff /out/kernel/config-changes.diff
 # AMD's licence for ps5_vcn.bin, which is now part of bzImage. The package
 # installs it under /usr/share/licenses/linux-ps5.
-cp /ps5-linux-patches/firmware/LICENSE.amdgpu /out/kernel/LICENSE.amdgpu
+cp "$PS5_PATCHSET/firmware/LICENSE.amdgpu" /out/kernel/LICENSE.amdgpu
 cp System.map Module.symvers /out/kernel/
 {
   echo "Linux $KVER for the CachyOS 7.3 image, PS5 firmware 11.60"
@@ -194,9 +243,10 @@ cp System.map Module.symvers /out/kernel/
   echo "Patch set:    rmuxnet/ps5-linux-patches-1, commit $PATCHES_COMMIT"
   echo "              linux.patch sha256 $PATCH_SHA256"
   echo "              .config sha256 $CONFIG_SHA256"
+  echo "Display/Pro:  ps5-bazzite-deck v1.8.5, commit $BAZZITE_COMMIT"
+  echo "              ${#BAZZITE_PATCHES[@]} kernel patches + local PS5 Pro 13dc follow-up"
   echo "              firmware/amdgpu/ps5_vcn.bin $VCN_SIZE bytes, sha256 $VCN_SHA256 (built in)"
-  echo "Bluetooth:    ps5-bazzite-deck v1.0.3 release asset ps5-btusb-quirks-fix.patch"
-  echo "              vendored as ps5-btusb-iw620-quirks.patch sha256 $BTUSB_PATCH_SHA256"
+  echo "HDMI:         4K120 FRL with EDID/chip-rate gate, link check and automatic fallback"
   echo "Config:       X86_PS5_CPUFREQ=m PS5_GPUFREQ=m, then olddefconfig; sha256 $(sha256sum .config | awk '{print $1}')"
   echo "Compiler:     $(x86_64-linux-gnu-gcc --version | head -1), $(uname -m) build host"
   echo "Version:      $(strings arch/x86/boot/bzImage | awk -v k="$KVER (" 'index($0, k) == 1 && !n { print; n = 1 }')"

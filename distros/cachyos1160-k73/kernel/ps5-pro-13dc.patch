@@ -1,0 +1,76 @@
+PS5 Pro: recognize both published Viola PCI IDs (0x13da and 0x13dc)
+
+rmux's p5-pro branch recognizes both IDs.  The merged upstream Pro patch and
+Bazzite v1.8.5 only recognize 0x13da.  Keep the Viola firmware, DC selection,
+and frequency-driver guards consistent for either retail ID.
+---
+
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu.h
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu.h
+@@ -994,12 +994,13 @@ static inline u32 amdgpu_ip_version(const struct amdgpu_device *adev,
+ 	return adev->ip_versions[ip][inst];
+ }
+ 
+-/* Viola is the Cyan Skillfish variant in the PS5 Pro, device ID 0x13DA. */
++/* Viola is the Cyan Skillfish variant in the PS5 Pro, device IDs 0x13DA/0x13DC. */
+ static inline bool amdgpu_is_viola(struct amdgpu_device *adev)
+ {
+ #ifdef CONFIG_X86_PS5
+ 	return adev->asic_type == CHIP_CYAN_SKILLFISH &&
+-	       adev->pdev->device == 0x13da;
++	       (adev->pdev->device == 0x13da ||
++		adev->pdev->device == 0x13dc);
+ #else
+ 	return false;
+ #endif
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+@@ -2185,6 +2185,7 @@ static const struct pci_device_id pciidlist[] = {
+ 
+ 	/* CYAN_SKILLFISH */
+ 	{ PCI_DEVICE(0x1002, 0x13DA), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
++	{ PCI_DEVICE(0x1002, 0x13DC), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
+ 	{ PCI_DEVICE(0x1002, 0x13DB), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
+ 	{ PCI_DEVICE(0x1002, 0x13F9), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
+ 	{ PCI_DEVICE(0x1002, 0x13FA), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
+--- a/drivers/gpu/drm/amd/display/include/dal_asic_id.h
++++ b/drivers/gpu/drm/amd/display/include/dal_asic_id.h
+@@ -218,6 +218,7 @@
+ #define DEVICE_ID_NV_13FB 0x13FB
+ #define DEVICE_ID_NV_13FC 0x13FC
+ #define DEVICE_ID_NV_13DA 0x13DA
++#define DEVICE_ID_NV_13DC 0x13DC
+ #define DEVICE_ID_NV_13DB 0x13DB
+ #define FAMILY_VGH 144
+ #define DEVICE_ID_VGH_163F 0x163F
+--- a/drivers/gpu/drm/amd/display/dc/core/dc_resource.c
++++ b/drivers/gpu/drm/amd/display/dc/core/dc_resource.c
+@@ -210,6 +210,7 @@ enum dce_version resource_parse_asic_id(struct hw_asic_id asic_id)
+ 		    asic_id.chip_id == DEVICE_ID_NV_13FB ||
+ 		    asic_id.chip_id == DEVICE_ID_NV_13FC ||
+ 		    asic_id.chip_id == DEVICE_ID_NV_13DA ||
++		    asic_id.chip_id == DEVICE_ID_NV_13DC ||
+ 		    asic_id.chip_id == DEVICE_ID_NV_13DB) {
+ 			dc_version = DCN_VERSION_2_01;
+ 			break;
+--- a/drivers/cpufreq/ps5-cpufreq.c
++++ b/drivers/cpufreq/ps5-cpufreq.c
+@@ -147,6 +147,8 @@ static int __init ps5_cpufreq_init(void)
+ 	 * (Pro tester, v1.8.x). The Pro keeps the CPU clock its firmware sets.
+ 	 */
+ 	struct pci_dev *pro = pci_get_device(PCI_VENDOR_ID_ATI, 0x13da, NULL);
++	if (!pro)
++		pro = pci_get_device(PCI_VENDOR_ID_ATI, 0x13dc, NULL);
+ 
+ 	if (pro) {
+ 		pci_dev_put(pro);
+--- a/drivers/devfreq/ps5-gpufreq.c
++++ b/drivers/devfreq/ps5-gpufreq.c
+@@ -295,5 +295,7 @@ static bool ps5_gpufreq_is_pro(void)
+ {
+ 	struct pci_dev *p = pci_get_device(PCI_VENDOR_ID_ATI, 0x13da, NULL);
++	if (!p)
++		p = pci_get_device(PCI_VENDOR_ID_ATI, 0x13dc, NULL);
+ 
+ 	pci_dev_put(p);
+ 	return p;

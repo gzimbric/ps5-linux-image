@@ -6,6 +6,12 @@ Linux 7.3.0. On top of the cachyos1160 changes it adds the IW620 Wi-Fi driver
 built for the new kernel, guarded CPU and GPU frequency-driver startup,
 automatic `tty1` session handoff, and safe pacman boot-file updates.
 
+Current `main` is preparing the next image for PS5 Pro and 4K120 testing. It
+uses the complete, hash-checked Bazzite Deck v1.8.5 display stack on Linux 7.3,
+including FRL capability checks and automatic fallback, plus the merged Viola
+GPU and Pro Bluetooth work. This source state is newer than the published
+Image 3 identities below and has not yet been booted on hardware.
+
 A local pre-release image from this profile booted on hardware in Run 21.
 Display, Ethernet, loader-supplied IW620 Wi-Fi and the frequency drivers all
 worked in that run. Later live tests on the same system passed Plasma Wi-Fi
@@ -206,26 +212,24 @@ The PS5 kernel baseline is the exact 7.3 patch set published by rmux
 (Armandas Kvietkus):
 [rmuxnet/ps5-linux-patches-1](https://github.com/rmuxnet/ps5-linux-patches-1),
 used as published at commit
-`36f173f39e5e76c00c4e366a7b909f33bc665ad5`. It is rmux's port of the
+`baee34dbbf9f6b33aca332e9487c5984e345f526`. It is rmux's port of the
 ps5-linux PS5 patches to Linux 7.3, plus rmux's CPU frequency
 (`ps5_cpufreq`) and GPU frequency (`ps5_gpufreq`) drivers. The build fetches
 `linux.patch`, the kernel config and the VCN firmware from that commit and
 checks each by SHA-256; the pinned `linux.patch` hash is
-`b8a238b9973febbcf851053d99195bd7320bb0827c8ee5e4c54eba6b6f7cde3f`.
+`fa7b9b6d204a1d16318fa293e0e7e8944d85a435a377d8c0836261c63ad353cf`.
 It does not rewrite or replace rmux's patch set, and the authorship carried
 in the patch and drivers is unchanged.
 
-The Image 3 profile also applies one separate, byte-for-byte and hash-checked
-kernel follow-up,
-[`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch). It
-makes the IW620-specific `quirks_table` match take precedence over the generic
-Bluetooth class match and performs the IW620 interface restriction after that
-lookup. The file is the exact `ps5-btusb-quirks-fix.patch` release asset from
-[VivaLaVent's Bazzite Deck v1.0.3](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.0.3),
-SHA-256 `c01bdcc134f25a86825f2824d12a82da02db18e7b1940db722223b0c4611eed8`.
-It is not part of rmux's pinned patch, so the builder applies it afterward and
-compiles a matching `btusb.ko`; modules from another image must not be copied
-over it.
+The builder then fetches
+[VivaLaVent's Bazzite Deck v1.8.5](https://github.com/VivaLaVent/ps5-bazzite-deck/releases/tag/v1.8.5)
+at commit `96d0c342017968ee2bfc3f56730c9808f2b98342`, verifies all 29 patch files
+against [`v1.8.5-patches.sha256`](kernel/v1.8.5-patches.sha256), and applies
+the same order as that release. This brings in the HDMI/VRR prerequisites,
+4K120 FRL path, EDID and HDMI-chip capability gate, automatic failed-link
+fallback, and the merged PS5 Pro GPU/Bluetooth changes. The small local
+[`ps5-pro-13dc.patch`](kernel/ps5-pro-13dc.patch) recognizes both Pro GPU IDs
+published on rmux's Pro branch rather than only 13da.
 
 Bazzite reports a paired DualSense on a CFI-10xx PS5 running firmware 13.60
 with Linux 7.3 after this correction. The exact Bazzite base used by that
@@ -313,12 +317,13 @@ fetches each source at a pinned commit:
 | Source | Commit |
 |--------|--------|
 | Linux, tag `v7.3` | `c03c1a14507dfaf8b856c2608f9ac216021fc222` |
-| rmuxnet/ps5-linux-patches-1 | `36f173f39e5e76c00c4e366a7b909f33bc665ad5` |
+| rmuxnet/ps5-linux-patches-1 | `baee34dbbf9f6b33aca332e9487c5984e345f526` |
+| VivaLaVent/ps5-bazzite-deck tag `v1.8.5` | `96d0c342017968ee2bfc3f56730c9808f2b98342` |
 | ps5-linux/ps5-linux-mwifiex | `4bce848dd098bf74fbafd0078463da3d9f0d7f80` |
 | nxp-imx/mwifiex | `a5fe4e194bf99315e349d81d77d6dfacec70757a` |
 
 `--patches-repo URL` fetches the patch set from a mirror instead; it still
-has to have commit `36f173f`, and the files are still checked by SHA-256.
+has to have commit `baee34d`, and the files are still checked by SHA-256.
 The CI workflow takes the same URL as its `patches_repo` input.
 
 It builds in the same Debian kernel-builder image and package snapshot as
@@ -326,11 +331,10 @@ the Ubuntu 24.04 kernel (`x86_64-linux-gnu-gcc (Debian 14.2.0-19) 14.2.0`),
 with a fixed build user, host and timestamp. The kernel step
 ([`docker/kernel-builder/build-k73.sh`](../../docker/kernel-builder/build-k73.sh)):
 
-- checks `linux.patch` (`b8a238b9…`), the `.config` (`2294e750…`) and
+- checks `linux.patch` (`fa7b9b6d…`), the `.config` (`2294e750…`) and
   `firmware/amdgpu/ps5_vcn.bin` (404,544 bytes, `bbd15ab6…`) by SHA-256 and
-  applies the patch to v7.3, then checks and applies the local
-  [`ps5-btusb-iw620-quirks.patch`](kernel/ps5-btusb-iw620-quirks.patch)
-  (`c01bdcc…`);
+  applies the patch to v7.3, then checks and applies the Bazzite v1.8.5
+  display/Pro sequence and the local 13dc follow-up;
 - sets `X86_PS5_CPUFREQ=m` and `PS5_GPUFREQ=m` (the published config has them
   built in) and runs `make olddefconfig`. Every other difference from the
   published config is a toolchain line; the build log shows the diff;
@@ -338,7 +342,9 @@ with a fixed build user, host and timestamp. The kernel step
   the kernel, and checks `bzImage` against the bounded loader;
 - records the `bzImage` size and SHA-256 in `kernel/kernel-build-info.txt`.
 
-`amdgpu` keeps `dpm=0 gpu_recovery=0 force_1080p=1`
+`amdgpu` keeps `dpm=0 gpu_recovery=0 ps5_viola_fw=0`; 1080p is no longer
+forced, because the new HDMI stack capability-gates 4K120 and falls back on a failed FRL link. Viola is staged but not selected by default because its
+post-header initialization path has no Cyan fallback yet
 ([`config/ps5-amdgpu.conf`](config/ps5-amdgpu.conf)).
 
 The Wi-Fi step
@@ -356,7 +362,7 @@ modpost warning, and checks `.return_sites`, the vermagic and the IW620 PCI
 alias. Passing those gates does not replace an exact-image hardware test.
 
 [`scripts/package-linux-ps5-k73.sh`](../../scripts/package-linux-ps5-k73.sh)
-packages the kernel as `linux-ps5 7.3.0-3` for pacman, laid out like the
+packages the kernel as `linux-ps5 7.3.0-4` for pacman, laid out like the
 upstream package (kernel, modules, build headers, UAPI headers) plus AMD's
 licence for `ps5_vcn.bin` in `/usr/share/licenses/linux-ps5`. Its install
 script does nothing to `/boot/efi`; the pacman hook below does that.
@@ -367,7 +373,7 @@ script does nothing to `/boot/efi`; the pacman hook below does that.
 checks the base download, its partition table and both partition hashes,
 then in a chroot without network:
 
-1. replaces `linux-ps5 7.1.7-1` with `7.3.0-3` (`pacman -U`, install script
+1. replaces `linux-ps5 7.1.7-1` with `7.3.0-4` (`pacman -U`, install script
    skipped) and removes the old `/boot/initrd.img-7.1.7`;
 2. installs `mlan.ko` and `moal.ko` in `/usr/lib/modules/7.3.0/updates/ps5-iw620`
    and runs `depmod`;
@@ -445,7 +451,7 @@ when it exits.
 
 What is different:
 
-- **Kernel.** `linux-ps5 7.3.0-3` replaces 7.1.7. The 7.1.7 package also
+- **Kernel.** `linux-ps5 7.3.0-4` replaces 7.1.7. The 7.1.7 package also
   carried a modules-load entry and options for its own Wi-Fi build, the
   `ps5-stage-firmware` helper and `ps5-bt-quiet`; they go with it. The
   profile puts `ps5-bt-quiet` and its unit back unchanged, enabled as before.
@@ -472,11 +478,10 @@ What is different:
   IW620 scan cycle had already invalidated. A WPA3-SAE network then joined from
   the normal Plasma menu, obtained DHCP and completed an HTTPS request over
   Wi-Fi.
-- **Bluetooth.** The kernel applies the exact, hash-pinned Bazzite Deck v1.0.3
-  source patch after rmux's patch set. It makes the IW620 quirks win over
-  btusb's earlier generic class match and applies the IW620 interface
-  restriction after the quirk lookup. The image rebuilds the module for this
-  kernel; it never copies Bazzite's binary. `/etc/bluetooth/main.conf` keeps
+- **Bluetooth.** The kernel applies Bazzite Deck v1.8.5's hash-pinned Bluetooth
+  patches after rmux's patch set, covering IW620 ordering and the Pro's
+  `0e8d:3605` controller. The image rebuilds the module for this kernel; it
+  never copies Bazzite's binary. `/etc/bluetooth/main.conf` keeps
   the adapter pairable, permits the DualSense Just-Works repair and pins the
   same controller, privacy and auto-enable behavior used by the working
   Bazzite image. `/etc/bluetooth/input.conf` explicitly keeps
@@ -502,6 +507,15 @@ What is different:
   rollback because unloading does not restore the clocks. Create an empty
   `/boot/efi/disable-ps5-performance` file and fully power off to skip the
   startup policy on the next boot.
+- **PS5 Pro GPU firmware.** The loader dumps all eight `viola_*.bin` files to
+  `/boot/efi/lib/firmware/amdgpu`. On a Pro,
+  [`ps5-stage-gpu-firmware.service`](files/ps5-stage-gpu-firmware.service)
+  copies the complete set atomically and runs the existing bounded
+  `ps5-update-boot-files` path. The image still pins `ps5_viola_fw=0`, so amdgpu
+  stays on Cyan Skillfish firmware unless a tester deliberately removes that
+  option and rebuilds/deploys the initramfs. A missing or incomplete set is
+  never deployed. The Pro also skips the standard PS5 frequency-driver policy
+  and leaves clocks to its firmware.
 - **Desktop handoff.** First boot opens Plasma so the tester can configure a
   network; Steam's first Gaming Mode bootstrap needs that connection. After
   that one-shot desktop session, Gaming Mode is the default. The Gamescope
@@ -539,8 +553,9 @@ What is different:
   firmware, initcpio hooks, DKMS modules or systemd (the triggers mkinitcpio
   uses for its own images), so an ordinary `pacman -Syu` can run it too. It
   builds a new initramfs and checks it the way the image build does
-  (`amdgpu.ko` for the kernel, the eight Cyan Skillfish 2 firmware files and
-  `ps5-amdgpu.conf`, and none of `mlan`, `moal`, the frequency drivers or
+  (`amdgpu.ko` for the kernel, all eight Cyan Skillfish 2 files, all eight
+  Viola files when staging has begun, `ps5-amdgpu.conf`, and none of `mlan`,
+  `moal`, the frequency drivers or
   IW620 firmware), runs the bounded loader check on it and the kernel, and
   only then replaces `bzImage` and `initrd.img` on `/boot/efi` and
   `/boot/initrd.img-<version>`. If a check fails, nothing is replaced. The

@@ -17,9 +17,9 @@ umask 022
 
 KVER=7.3.0
 PKGNAME=linux-ps5
-PKGVER=${KVER}-3
-# Commit time of the pinned patch set (36f173f).
-SOURCE_DATE_EPOCH=1792339253
+PKGVER=${KVER}-4
+# Commit time of the pinned rmux patch-set base (baee34d).
+SOURCE_DATE_EPOCH=1792851696
 
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 INSTALL_TEMPLATE=$REPO/distros/cachyos1160-k73/kernel/linux-ps5.install

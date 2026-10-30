@@ -8,10 +8,10 @@
 # (docker/kernel-builder/build-iw620-k73.sh). scripts/package-linux-ps5-k73.sh
 # then turns the result into the linux-ps5 pacman package.
 #
-# The kernel patch set is the 7.3 port with the PS5 CPU and GPU frequency
-# drivers by rmux (Armandas Kvietkus), rmuxnet/ps5-linux-patches-1, fetched at
-# the pinned commit. The builder then applies the exact, hash-pinned IW620
-# Bluetooth source patch published with ps5-bazzite-deck v1.0.3.
+# The kernel starts with rmux's pinned 7.3 port, then applies the exact,
+# hash-checked PS5 display and Pro patch stack published by ps5-bazzite-deck
+# v1.8.5. That stack provides HDMI 2.1 FRL 4K120, link-capability gating and
+# automatic fallback, plus the merged PS5 Pro GPU and Bluetooth support.
 #
 # Needs git and Docker. Runs on Linux or macOS; GitHub Actions uses an x86_64
 # runner and the linux/amd64 builder.
@@ -23,7 +23,10 @@ LINUX_TAG=v7.3
 LINUX_TAG_OBJECT=091b06388b117fefdcb63336ac09956a4914b961
 LINUX_COMMIT=c03c1a14507dfaf8b856c2608f9ac216021fc222
 PATCHES_REPO=https://github.com/rmuxnet/ps5-linux-patches-1.git
-PATCHES_COMMIT=36f173f39e5e76c00c4e366a7b909f33bc665ad5
+PATCHES_COMMIT=baee34dbbf9f6b33aca332e9487c5984e345f526
+BAZZITE_REPO=https://github.com/VivaLaVent/ps5-bazzite-deck.git
+BAZZITE_TAG=v1.8.5
+BAZZITE_COMMIT=96d0c342017968ee2bfc3f56730c9808f2b98342
 PS5_MWIFIEX_REPO=https://github.com/ps5-linux/ps5-linux-mwifiex.git
 PS5_MWIFIEX_COMMIT=4bce848dd098bf74fbafd0078463da3d9f0d7f80
 NXP_MWIFIEX_REPO=https://github.com/nxp-imx/mwifiex.git
@@ -42,7 +45,8 @@ REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 usage() {
   cat <<EOF
 Usage: $0 [--out DIR] [--work DIR] [--platform linux/amd64|linux/arm64]
-          [--linux-repo URL] [--patches-repo URL] [--jobs N] [--keep-volume]
+          [--linux-repo URL] [--patches-repo URL] [--bazzite-repo URL]
+          [--jobs N] [--keep-volume]
 
   --out DIR        output directory (default: linux-bin/cachyos1160-k73). It
                    has to be on a case-sensitive filesystem: the kernel
@@ -60,6 +64,11 @@ Usage: $0 [--out DIR] [--work DIR] [--platform linux/amd64|linux/arm64]
                    (for example a mirror); it must still have commit
                    $PATCHES_COMMIT, and linux.patch,
                    .config and ps5_vcn.bin are still checked by SHA-256
+  --bazzite-repo URL
+                   fetch the v1.8.5 display/Pro patch stack from this
+                   repository instead of $BAZZITE_REPO; tag $BAZZITE_TAG must
+                   still resolve to $BAZZITE_COMMIT and every patch is
+                   checked by SHA-256
   --jobs N         parallel build jobs (default: all CPUs in the container)
   --keep-volume    keep the Docker volume with the built kernel tree
 EOF
@@ -80,6 +89,7 @@ while (($#)); do
     --platform) (($# >= 2)) || die "--platform needs a value"; platform=$2; shift 2 ;;
     --linux-repo) (($# >= 2)) || die "--linux-repo needs a URL"; LINUX_REPO=$2; shift 2 ;;
     --patches-repo) (($# >= 2)) || die "--patches-repo needs a URL"; PATCHES_REPO=$2; shift 2 ;;
+    --bazzite-repo) (($# >= 2)) || die "--bazzite-repo needs a URL"; BAZZITE_REPO=$2; shift 2 ;;
     --jobs) (($# >= 2)) || die "--jobs needs a number"; jobs=$2; shift 2 ;;
     --keep-volume) keep_volume=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -145,12 +155,18 @@ fetch_pinned "$work/linux.git" "$LINUX_REPO" "refs/tags/$LINUX_TAG" "$LINUX_COMM
 [[ $(git -C "$work/linux.git" rev-parse FETCH_HEAD) == "$LINUX_TAG_OBJECT" ]] ||
   die "tag $LINUX_TAG is not the tag object $LINUX_TAG_OBJECT"
 fetch_pinned "$work/ps5-linux-patches.git" "$PATCHES_REPO" "$PATCHES_COMMIT" "$PATCHES_COMMIT"
+fetch_pinned "$work/ps5-bazzite-deck.git" "$BAZZITE_REPO" \
+  "refs/tags/$BAZZITE_TAG" "$BAZZITE_COMMIT"
 fetch_pinned "$work/iw620/ps5-linux-mwifiex" "$PS5_MWIFIEX_REPO" "$PS5_MWIFIEX_COMMIT" "$PS5_MWIFIEX_COMMIT"
 fetch_pinned "$work/iw620/nxp-mwifiex" "$NXP_MWIFIEX_REPO" "$NXP_MWIFIEX_COMMIT" "$NXP_MWIFIEX_COMMIT"
 rm -rf -- "$work/ps5-linux-patches"
 mkdir -p -- "$work/ps5-linux-patches"
 git -C "$work/ps5-linux-patches.git" archive "$PATCHES_COMMIT" linux.patch .config firmware |
   tar -xf - -C "$work/ps5-linux-patches"
+rm -rf -- "$work/ps5-bazzite-deck"
+mkdir -p -- "$work/ps5-bazzite-deck"
+git -C "$work/ps5-bazzite-deck.git" archive "$BAZZITE_COMMIT" patches |
+  tar -xf - -C "$work/ps5-bazzite-deck"
 
 log "Kernel builder ($platform)"
 docker build --platform "$platform" \
@@ -167,6 +183,7 @@ docker volume create "$volume" >/dev/null
 docker run "${run_args[@]}" \
   -v "$work/linux.git:/in/linux.git:ro" \
   -v "$work/ps5-linux-patches:/ps5-linux-patches:ro" \
+  -v "$work/ps5-bazzite-deck/patches:/bazzite-patches:ro" \
   --entrypoint /bin/bash "$builder" /repo/docker/kernel-builder/build-k73.sh
 
 log "IW620 Wi-Fi modules"
