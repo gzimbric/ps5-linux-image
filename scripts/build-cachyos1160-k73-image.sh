@@ -30,15 +30,15 @@ BASE_SIZE=12582912000
 # GPT layout of the base image, in 512-byte sectors.
 P1_START=1024000 P1_SECTORS=23549952  # ext4, LABEL=cachyos
 P2_START=2048 P2_SECTORS=1021952      # FAT32, LABEL=boot
-P1_SHA256=10ecc168fc9450c5c87f447391b75215973bb2e124c7e6ba96398027274b774e
-P2_SHA256=afde7e45f97308fb2ae63ece674a65821b34e8f8eafbc202b076069c29c3d949
+P1_SHA256=4ee48dc54a591a6760322a5d33b0565d003c183860bee13ce864c00538872321
+P2_SHA256=38ca1646cd6ba3d34e4049aba5c9fde364101711e7438634bae71f30d82683ff
 
 # The base image's kernel, and the files the build depends on.
-OLD_KVER=7.1.7
-OLD_PACKAGE="linux-ps5 7.1.7-1"
+OLD_KVER=7.2.3
+OLD_PACKAGE="linux-ps5 7.2.3-1"
 MKINITCPIO_CONF_SHA256=6329d81d796228ef0a2c3ee3b16be551f4403dcb129defbab91aa4279f40bc77
-ROOT_VMLINUZ_717_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee34e99cde
-ROOT_INITRD_717_SHA256=ba6dd1d0e69149e6be60bfd655b4bfc8cac0eee546e1ba478f3bdd1240965a56
+ROOT_OLD_VMLINUZ_SHA256=ee6062e2c1fb792023e5a70cf3ab35263f53460ab9ae17221683d03f8c209594
+ROOT_OLD_INITRD_SHA256=63cc53e7cc663c83f964f9c29540cd2c275ad77fb6988e2d04127eb5bd2c1a45
 BLUEZ_MAIN_CONF_SHA256=d3762eb24785530885ffa51fffc81b078f5bb362d83cf2462989dbb6b2081912
 BLUEZ_INPUT_CONF_SHA256=d85aa14cab44a058d1ae13a0774961d011da735b49ae4d6546e2cc2e396c6d3d
 
@@ -59,11 +59,10 @@ declare -A FAT_SHA256=(
   [vram.txt]=bc4642feb06a4cc6d10d5865e321efaad7ab3f3f1d5d025151b79978164310a0
   [kexec.sh]=0f26e09911a8a2bc9912d7c77fee6ac09ccd18a820086cb103be92de081b6c52
 )
-# The base image's FAT bzImage (the 7.1.7 kernel, at the exact size the
-# earlier 11.60 loader builds require), replaced here.
-OLD_FAT_BZIMAGE_SHA256=11280a8f5ca197ee5458fd446a4dadf2d0b5d0ef6218583cbe6325ee34e99cde
+# The base image's FAT bzImage (the 7.2.3 kernel), replaced here.
+OLD_FAT_BZIMAGE_SHA256=ee6062e2c1fb792023e5a70cf3ab35263f53460ab9ae17221683d03f8c209594
 
-# Files of the 7.1.7 package that the profile puts back unchanged: the
+# Files of the old package that the profile puts back unchanged: the
 # Bluetooth helper the base image runs at boot.
 BT_QUIET_SHA256=d31222ead065ee2ab6fd55edda285741814bb8a470c9c26d355963ab39b46240
 BT_QUIET_SERVICE_SHA256=4cc7b16adbc3ef4d4a132d55e7e0bacd4e9bc9192096507d6e125301d821f32c
@@ -414,8 +413,8 @@ fsck.fat -n "$P2_DEV"
 
 mount_at "$M" -t ext4 -o ro,noload "$P1_DEV"
 root_manifest "$M" "$work/root-before.tsv"
-package_paths "$M/var/lib/pacman/local/linux-ps5-7.1.7-1/files" > "$work/package-old.paths"
-echo "linux-ps5 7.1.7-1 owns $(wc -l < "$work/package-old.paths") paths"
+package_paths "$M/var/lib/pacman/local/linux-ps5-7.2.3-1/files" > "$work/package-old.paths"
+echo "linux-ps5 7.2.3-1 owns $(wc -l < "$work/package-old.paths") paths"
 umount_all
 
 # ------------------------------------------------------------- root changes
@@ -430,8 +429,8 @@ mount_at "$R/run" -t tmpfs -o mode=0755 tmpfs
 in_root /usr/bin/uname -m
 
 expect_sha "$R/etc/mkinitcpio.conf" "$MKINITCPIO_CONF_SHA256" "/etc/mkinitcpio.conf"
-expect_sha "$R/boot/vmlinuz-$OLD_KVER" "$ROOT_VMLINUZ_717_SHA256" "/boot/vmlinuz-$OLD_KVER"
-expect_sha "$R/boot/initrd.img-$OLD_KVER" "$ROOT_INITRD_717_SHA256" "/boot/initrd.img-$OLD_KVER"
+expect_sha "$R/boot/vmlinuz-$OLD_KVER" "$ROOT_OLD_VMLINUZ_SHA256" "/boot/vmlinuz-$OLD_KVER"
+expect_sha "$R/boot/initrd.img-$OLD_KVER" "$ROOT_OLD_INITRD_SHA256" "/boot/initrd.img-$OLD_KVER"
 [[ $(in_root pacman -Q linux-ps5) == "$OLD_PACKAGE" ]] || die "the base image does not have $OLD_PACKAGE"
 
 add_file() { # mode source path-in-root
@@ -475,8 +474,8 @@ module_dirs=$(cd -- "$R/usr/lib/modules" && find . -mindepth 1 -maxdepth 1 -prin
 cmp -- "$R/boot/vmlinuz-$KVER" "$kernel_dir/kernel/bzImage" ||
   die "/boot/vmlinuz-$KVER is not the kernel that was built"
 echo "ok  /boot/vmlinuz-$KVER is the built bzImage"
-# mkinitcpio made this one for 7.1.7; no package owns it.
-expect_sha "$R/boot/initrd.img-$OLD_KVER" "$ROOT_INITRD_717_SHA256" "/boot/initrd.img-$OLD_KVER"
+# mkinitcpio made this one for the old kernel; no package owns it.
+expect_sha "$R/boot/initrd.img-$OLD_KVER" "$ROOT_OLD_INITRD_SHA256" "/boot/initrd.img-$OLD_KVER"
 rm -- "$R/boot/initrd.img-$OLD_KVER"
 
 log "IW620 Wi-Fi driver"
@@ -518,14 +517,14 @@ blocks=$(grep -rsE '^[[:space:]]*(blacklist|install)[[:space:]]+(moal|mlan)([[:s
   "$R/etc/modprobe.d" "$R/usr/lib/modprobe.d" || true)
 [[ $blocks == "$R/etc/modprobe.d/ps5-iw620.conf:blacklist moal" ]] ||
   die "expected only 'blacklist moal' in ps5-iw620.conf, found: ${blocks:-nothing}"
-# The 7.1.7 package's firmware stager and its sysinit link went with it.
+# The old package's firmware stager and its sysinit link went with it.
 pullins=$(find "$R/etc/systemd/system" "$R/usr/lib/systemd/system" \
   -name 'ps5-stage-firmware*' -print)
 [[ -z $pullins ]] || die "ps5-stage-firmware is still installed: $pullins"
 echo "ok  mlan.ko and moal.ko in /$updates/ps5-iw620, loaded by ps5-iw620-firmware, not by udev"
 
 log "Bluetooth helper"
-# ps5-bt-quiet came with the 7.1.7 package and is enabled in the base image.
+# ps5-bt-quiet came with the old package and is enabled in the base image.
 # The 7.3.0 package has no /etc or /usr/local files, so put it back as it was.
 add_file 0755 "$PROFILE/files/ps5-bt-quiet" usr/local/sbin/ps5-bt-quiet
 add_file 0644 "$PROFILE/files/ps5-bt-quiet.service" etc/systemd/system/ps5-bt-quiet.service
@@ -704,7 +703,7 @@ log "FAT boot partition"
 # Mount the FAT partition where the console mounts it and let the image's
 # own ps5-update-boot-files write bzImage and initrd.img, as the pacman hook
 # will after a kernel update. cmdline.txt goes on first, since the update
-# checks it too. The base image's 7.1.7 files are not kept as .prev copies.
+# checks it too. The base image's old files are not kept as .prev copies.
 mount_at "$R/boot/efi" -t vfat -o rw "$P2_DEV"
 listing=$(cd -- "$R/boot/efi" && find . -mindepth 1 -printf '%P\n' | sort)
 [[ $listing == "$(printf '%s\n' "${FAT_FILES[@]}" | sort)" ]] ||

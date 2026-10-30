@@ -1,7 +1,7 @@
 # CachyOS on Linux 7.3.0 for PS5 firmware 11.60
 
 This profile takes the same official `ps5-cachyos` image as
-[`cachyos1160`](../cachyos1160/README.md) and replaces its 7.1.7 kernel with
+[`cachyos1160`](../cachyos1160/README.md) and replaces its 7.2.3 kernel with
 Linux 7.3.0. On top of the cachyos1160 changes it adds the IW620 Wi-Fi driver
 built for the new kernel, guarded CPU and GPU frequency-driver startup,
 automatic `tty1` session handoff, and safe pacman boot-file updates.
@@ -374,8 +374,8 @@ script does nothing to `/boot/efi`; the pacman hook below does that.
 checks the base download, its partition table and both partition hashes,
 then in a chroot without network:
 
-1. replaces `linux-ps5 7.1.7-1` with `7.3.0-4` (`pacman -U`, install script
-   skipped) and removes the old `/boot/initrd.img-7.1.7`;
+1. replaces `linux-ps5 7.2.3-1` with `7.3.0-4` (`pacman -U`, install script
+   skipped) and removes the old `/boot/initrd.img-7.2.3`;
 2. installs `mlan.ko` and `moal.ko` in `/usr/lib/modules/7.3.0/updates/ps5-iw620`
    and runs `depmod`;
 3. applies the profile below;
@@ -390,7 +390,7 @@ The build stops unless:
 
 - `pacman -Qkk linux-ps5` shows no changed package files apart from the
   module indexes `depmod` rewrote;
-- no file of the 7.1.7 package is left behind, other than the Bluetooth
+- no file of the 7.2.3 package is left behind, other than the Bluetooth
   helper that is put back on purpose;
 - every other root filesystem change matches
   [`root-changes.expected`](root-changes.expected) exactly;
@@ -452,12 +452,12 @@ when it exits.
 
 What is different:
 
-- **Kernel.** `linux-ps5 7.3.0-4` replaces 7.1.7. The 7.1.7 package also
+- **Kernel.** `linux-ps5 7.3.0-4` replaces 7.2.3. The 7.2.3 package also
   carried a modules-load entry and options for its own Wi-Fi build, the
   `ps5-stage-firmware` helper and `ps5-bt-quiet`; they go with it. The
   profile puts `ps5-bt-quiet` and its unit back unchanged, enabled as before.
 - **Wi-Fi.** `mlan.ko` and `moal.ko` in `updates/ps5-iw620`, and the module
-  options already used with the 7.1.7 Ubuntu Wi-Fi build in
+  options already used with the earlier Ubuntu Wi-Fi build in
   `/etc/modprobe.d/ps5-iw620.conf`. That file also has `blacklist moal`, so
   udev does not load `moal` through its PCI alias: it would do that before
   `/boot/efi` is mounted, and without the firmware the probe fails.
