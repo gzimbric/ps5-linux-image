@@ -68,7 +68,7 @@ BT_QUIET_SHA256=d31222ead065ee2ab6fd55edda285741814bb8a470c9c26d355963ab39b46240
 BT_QUIET_SERVICE_SHA256=4cc7b16adbc3ef4d4a132d55e7e0bacd4e9bc9192096507d6e125301d821f32c
 OLD_SESSION_SELECT_SHA256=f6fb96619489228225ccbc2d7f782d5791c5a2e6d9f66f5d0f843d64d35d1f74
 OLD_GAMESCOPE_SESSION_SHA256=5b50d084becac615c8a27670f79d99d7aa9bbbfcd40ba50e3903005e493cb85a
-OLD_NEXT_SESSION_SHA256=df84d3e62a7e09d6ec7a9f6bb3f2f2060eed95618c315ac0ea2f6d62efd91b0e
+NEXT_SESSION_DESKTOP_SHA256=e1eb72e080d8498fb7988921455ab4e66cc25cefd4b1a802446ed9e798e18b8b
 
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PROFILE=$REPO/distros/cachyos1160-k73
@@ -628,15 +628,10 @@ log "TTY session switching"
 # path for Power > Switch to Desktop; that exact route passed on the console.
 [[ -f $R/etc/ps5-use-tty-sessions ]] || die "/etc/ps5-use-tty-sessions is missing"
 next_session=$R/home/steam/.config/ps5-next-session
-expect_sha "$next_session" "$OLD_NEXT_SESSION_SHA256" \
-  "/home/steam/.config/ps5-next-session before replacement"
+expect_sha "$next_session" "$NEXT_SESSION_DESKTOP_SHA256" \
+  "/home/steam/.config/ps5-next-session (first session is Plasma)"
 [[ $(stat -c '%a %u %g' -- "$next_session") == '644 1000 1000' ]] ||
   die "/home/steam/.config/ps5-next-session has unexpected mode or owner"
-install -o 1000 -g 1000 -m 0644 /dev/null "$next_session.new"
-printf 'desktop\n' >"$next_session.new"
-mv -f -- "$next_session.new" "$next_session"
-[[ $(sha "$next_session") == e1eb72e080d8498fb7988921455ab4e66cc25cefd4b1a802446ed9e798e18b8b ]] ||
-  die "could not set the first session to Plasma"
 replace_file 0755 "$REPO/distros/cachyos/files/steamos-session-select" \
   usr/bin/steamos-session-select "$OLD_SESSION_SELECT_SHA256"
 replace_file 0755 "$REPO/distros/cachyos/files/gamescope-session-ps5" \
