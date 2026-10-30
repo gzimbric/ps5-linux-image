@@ -25,7 +25,7 @@ firmware_names=(ce me mec pfp rlc sdma sdma1)
 expected_packages=(
   "linux-ps5 7.3.0-4"
   "linux-firmware-amdgpu 20260916-1"
-  "mkinitcpio 41.1-1"
+  "mkinitcpio 42.2-1"
   "mkinitcpio-busybox 1.36.1-1"
   "zstd 1.5.7-3"
 )
@@ -67,15 +67,17 @@ if [[ ! -d "/usr/lib/modules/$kernel_version" ]]; then
   exit 1
 fi
 
+package_mismatches=0
 for expected in "${expected_packages[@]}"; do
   package=${expected%% *}
   installed=$(pacman -Q "$package" 2>/dev/null || true)
   if [[ "$installed" != "$expected" ]]; then
     printf 'Package mismatch: expected %s, found %s\n' \
       "$expected" "${installed:-not installed}" >&2
-    exit 1
+    package_mismatches=1
   fi
 done
+(( package_mismatches == 0 )) || exit 1
 
 if ! grep -Eq \
   '^[[:space:]]*MODULES=\([[:space:]]*amdgpu[[:space:]]*\)[[:space:]]*$' \
