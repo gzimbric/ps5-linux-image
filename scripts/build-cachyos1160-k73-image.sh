@@ -2,8 +2,8 @@
 # Build the CachyOS 7.3 image for PS5 firmware 11.60.
 #
 # Starts from the same official ps5-cachyos.img.xz as the cachyos1160 recipe
-# (ps5-linux/ps5-linux-image release built 2026-08-29 from upstream commit
-# 52db0a4), replaces its linux-ps5 7.1.7 kernel with the 7.3.0 package from
+# (ps5-linux/ps5-linux-image build 2026-10-29 from upstream commit d68a854,
+# kernel 7.2.3 and patches 0e91638), replaces its kernel with the 7.3.0 package from
 # scripts/build-linux-ps5-k73.sh and scripts/package-linux-ps5-k73.sh, adds
 # the IW620 Wi-Fi modules built for that kernel, applies the
 # distros/cachyos1160-k73 profile, builds the initramfs, and writes the new
@@ -24,7 +24,7 @@ export LC_ALL=C
 umask 022
 
 BASE_URL=https://pub-561df4012f1a46fbbdf618d5cc5941f6.r2.dev/ps5-cachyos.img.xz
-BASE_XZ_SHA256=9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1
+BASE_XZ_SHA256=2019d6c5c2fd14ed4849dd908481c9edafc3961f61742bfb2ba0565938784c2f
 BASE_SIZE=12582912000
 
 # GPT layout of the base image, in 512-byte sectors.
@@ -343,11 +343,13 @@ layout=$(partx -g -o NR,START,SECTORS -- "$PARTIAL" | awk '{ print $1, $2, $3 }'
   die "unexpected partition table: $layout"
 echo "ok  p1 $P1_START+$P1_SECTORS, p2 $P2_START+$P2_SECTORS  partition table"
 
-[[ $(region_sha "$P2_START" "$P2_SECTORS") == "$P2_SHA256" ]] ||
-  die "p2 (FAT) region does not match the official image"
+p2_sha=$(region_sha "$P2_START" "$P2_SECTORS")
+[[ $p2_sha == "$P2_SHA256" ]] ||
+  die "p2 (FAT) sha256 $p2_sha, expected $P2_SHA256"
 echo "ok  $P2_SHA256  p2 region before changes"
-[[ $(region_sha "$P1_START" "$P1_SECTORS") == "$P1_SHA256" ]] ||
-  die "p1 (root) region does not match the official image"
+p1_sha=$(region_sha "$P1_START" "$P1_SECTORS")
+[[ $p1_sha == "$P1_SHA256" ]] ||
+  die "p1 (root) sha256 $p1_sha, expected $P1_SHA256"
 echo "ok  $P1_SHA256  p1 region before changes"
 
 # ----------------------------------------------------- partitions, before

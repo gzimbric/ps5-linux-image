@@ -38,9 +38,10 @@ hosted results separate when reporting tests.
 > read-back-verified 65 C autoservo target for the next image. The source-tree
 > correction is not present in the published Image 3 hash.
 
-The base is `ps5-cachyos.img.xz` from the ps5-linux/ps5-linux-image release
-built on 2026-08-29 from upstream commit `52db0a4`
-(sha256 `9a29ca88c408cd290c19f4693f764251aab5698bb55c9f38fbf06c2764f21db1`).
+The base is `ps5-cachyos.img.xz` from the successful CachyOS job in the
+ps5-linux/ps5-linux-image build on 2026-10-29 at upstream commit `d68a854`,
+kernel 7.2.3 and patch commit `0e91638`
+(sha256 `2019d6c5c2fd14ed4849dd908481c9edafc3961f61742bfb2ba0565938784c2f`).
 
 ## Current Image 3 prerelease
 
