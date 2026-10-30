@@ -24,7 +24,7 @@ firmware_names=(ce me mec pfp rlc sdma sdma1)
 
 expected_packages=(
   "linux-ps5 7.3.0-4"
-  "linux-firmware-amdgpu 20260810-2"
+  "linux-firmware-amdgpu 20260916-1"
   "mkinitcpio 41.1-1"
   "mkinitcpio-busybox 1.36.1-1"
   "zstd 1.5.7-3"
